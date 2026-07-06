@@ -1,31 +1,99 @@
-# 데일리 트렌드 뷰어
+# Daily Trend Viewer
 
-유튜브 인기 동영상·쇼츠·인스타 릴스와 AI 영상 소식을 카테고리별 × 조회수순으로 매일 확인하는 로컬 웹사이트입니다.
-API 키 없이 동작하며, 외부 패키지 설치도 필요 없습니다(파이썬 표준 라이브러리만 사용).
+A local dashboard for checking what's trending — YouTube videos & Shorts,
+Instagram Reels, X posts, Threads, TikTok, and AI-video model/news feeds —
+ranked by views/likes, per category and time period.
 
-## 실행 방법
+No API keys, no external packages: the server uses only the Python standard
+library and calls the platforms' public unauthenticated endpoints.
+
+## Run
 
 ```bash
-python3 ~/trend-viewer/server.py
+python3 server.py
 ```
 
-브라우저에서 **http://localhost:8778** 접속
+Then open **http://localhost:8778**.
 
-## 기능
+Optional configuration via environment variables:
 
-- **유튜브 / 쇼츠 탭**: 카테고리(전체·**AI**·먹방·뷰티·브이로그·예능·영화/드라마·테크·지식·여행·동물) × 기간(오늘/이번 주/이번 달) 필터, **접이식 정렬 메뉴로 조회수순/좋아요순 전환**(좋아요는 영상마다 서버가 조회해 보강), 카드 클릭 시 팝업 재생
-- **🤖 AI 영상 탭**: 새로 나온 영상 생성 모델 + 트렌딩 모델(Hugging Face 실시간)과 국내·해외 AI 영상 뉴스(구글 뉴스 RSS)만 표시(글 중심). 인기 AI 영상은 유튜브 탭의 'AI' 카테고리로 통합
-- **🔍 검색창**(헤더): 유튜브를 임의 키워드로 검색해 조회수순으로 표시. 검색 시 영상 탭으로 전환되며, 카테고리 클릭으로 검색 해제
-- **📸 릴스 탭**: 인스타그램 웹 내부 API(무인증)로 구독 계정들의 최신 릴스를 수집. **접이식 정렬 메뉴로 조회수순/좋아요순/댓글순 전환**(전부 실데이터, 즉시 재정렬). 계정은 화면에서 추가/삭제 (`reels_accounts.json`에 저장). 기본 계정: OpenAI·Runway·Pika·Luma·Midjourney·Kling·HeyGen·Higgsfield·DeepMind
-- **𝕏 트위터 탭**: 트위터 임베드용 공개 API(무인증)로 구독 계정들의 최신 트윗을 참여수와 함께 수집. **접이식 정렬 메뉴**로 좋아요·댓글·리트윗·조회수순 전환. 계정 추가/삭제 가능(`x_accounts.json`). 기본 계정: OpenAI·Runway·Kling·DeepMind·Midjourney·Luma·Pika·HeyGen·ElevenLabs·Meta AI
-- **🧵 스레드 탭**: 인스타그램(메타) 백엔드로 로그인 없이 실시간 조회를 시도. 메타가 조회를 막은 경우(현재 기본 상태) 각 계정 바로가기로 자동 폴백. 접이식 정렬 메뉴(좋아요·댓글·리포스트순) 제공, 계정 관리 가능(`threads_accounts.json`)
-- **🎵 틱톡 탭**: tikwm 무료 공개 API로 **실시간 인기 피드(한국)+구독 계정 최신 영상**을 조회수·좋아요·댓글까지 수집. **접이식 정렬 메뉴로 조회수순/좋아요순/댓글순 전환**. 계정 추가/삭제(`tiktok_accounts.json`). 기본 계정: openai·runwayapp·krea.ai·elevenlabs·sora·zachking·khaby.lame·google
-- **캐시**: 결과는 1시간 캐시되며, 우측 상단 새로고침 버튼으로 즉시 갱신 가능
+| Variable    | Default | Meaning                       |
+|-------------|---------|-------------------------------|
+| `PORT`      | `8778`  | HTTP port                     |
+| `YT_HL`     | `en`    | YouTube UI language           |
+| `YT_GL`     | `US`    | YouTube region                |
+| `REGION`    | `US`    | TikTok trending-feed region   |
+| `CACHE_TTL` | `3600`  | Cache lifetime in seconds     |
 
-## 참고 사항
+## Features
 
-- 유튜브 데이터는 내부 검색 API(InnerTube)를 조회수순 정렬로 호출해 가져옵니다. 유튜브의 공개 인기 급상승 피드는 2025년에 폐지되어 검색 기반으로 구성했습니다.
-- 인스타 릴스는 instagram.com 웹이 쓰는 내부 API(`web_profile_info` + 공개 앱 ID 헤더)를 무인증으로 호출합니다. 계정당 최근 12개 게시물이 한도이며, 요청이 잦으면 인스타그램이 일시적으로 제한할 수 있습니다(캐시로 완화). 썸네일은 CDN 핫링크 차단을 피해 서버 프록시(`/api/img`)로 전달합니다.
-- X(트위터)는 임베드 위젯이 쓰는 syndication API(`syndication.twitter.com/srv/timeline-profile/...`)를 무인증으로 호출해 좋아요·댓글·리트윗까지 가져옵니다. 조회수(impressions)는 이 API에 없어 정렬 옵션에서 값이 0인 글은 제외됩니다.
-- 스레드는 GraphQL 엔드포인트가 로그인 없이 응답하지만, 프로필 글 쿼리의 `doc_id`가 수시로 바뀌고 초기 HTML/JS 번들에 없어(헤드리스 브라우저로만 추출 가능) 안정적 조회가 어렵습니다. `server.py`의 `THREADS_DOC_IDS`에 유효한 doc_id를 넣으면 즉시 실시간 조회가 동작하며, 그렇지 않으면 계정 바로가기로 폴백합니다.
-- 틱톡은 자체 웹/모바일 API가 서명(X-Bogus·msToken)과 TLS 지문 검사를 요구해 직접 무인증 호출이 막힙니다. 대신 **tikwm 무료 공개 API**(`www.tikwm.com/api`)가 서명을 대신 처리해 조회수·좋아요·댓글·썸네일·영상URL을 반환합니다. 무료 티어라 동시성이 높으면 일시 제한될 수 있어 서버는 낮은 동시성(3)으로 호출하고 1시간 캐시합니다. 썸네일(tiktokcdn)은 서버 이미지 프록시(`/api/img`, 메모리 캐시)로 전달합니다.
+- **YouTube / Shorts tabs** — category chips (All · **AI** · Mukbang · Beauty ·
+  Vlog · Comedy · Movies/TV · Tech · Education · Travel · Animals) × period
+  (today / this week / this month), collapsible **sort menu (views / likes)**
+  — like counts are enriched per video server-side — and a popup player.
+- **🤖 AI Videos tab** — newly released and trending video-generation models
+  (Hugging Face, live) plus AI-video news (Google News RSS). Popular AI
+  *videos* live under the YouTube tab's "AI" category.
+- **🔍 Search** — on the video tabs it searches YouTube by any keyword; on the
+  Reels/X/Threads/TikTok tabs it live-filters the already-loaded items.
+- **📸 Reels tab** — latest reels from subscribed accounts via Instagram's
+  web-internal API (no auth), sortable by views / likes / comments and
+  filterable by period. Accounts are managed in the UI
+  (`reels_accounts.json`).
+- **𝕏 Twitter tab** — recent tweets with engagement via Twitter's public
+  embed (syndication) API, sortable by likes / replies / retweets / views
+  (`x_accounts.json`).
+- **🧵 Threads tab** — anonymous live lookup against Meta's GraphQL endpoint,
+  including **automatic discovery of the rotating `doc_id`** from the
+  threads.com JS bundles; falls back to account shortcuts when Meta blocks
+  anonymous reads (`threads_accounts.json`).
+- **🎵 TikTok tab** — live trending feed + subscribed accounts via the free
+  tikwm API, with views / likes / comments and period filtering
+  (`tiktok_accounts.json`).
+- **⭐ Saved tab** — star any card on any tab to collect it in
+  `favorites.json`.
+- **📈 Trend history** — every successful fetch snapshots per-item metrics
+  into a local SQLite file (`trends.db`); cards then show a **daily delta
+  badge** (▲/▼ vs the previous day) and a mini sparkline once three days of
+  data exist.
+- **Resilient caching** — results are cached (1 h by default) and a failed
+  refresh **never blanks a tab**: the last good data is served with a
+  "cached data" warning while the server retries in the background, and
+  accounts that keep failing are cooled down for 10 minutes instead of being
+  hammered.
+
+## Notes on the data sources
+
+- **YouTube** data comes from the internal search API (InnerTube) with a
+  views-sorted filter; the public Trending feed was retired in 2025, so the
+  rankings are search-based. Like counts are read from the structured
+  `likeCountEntity` (locale-independent), with a text fallback.
+- **Instagram Reels** uses the same `web_profile_info` endpoint the
+  instagram.com web client calls (with its public app-id header). It returns
+  each account's ~12 most recent posts; heavy use can be temporarily
+  rate-limited, which the cache and backoff absorb. Thumbnails are served
+  through the local image proxy (`/api/img`) to bypass CDN hotlink blocks.
+- **X (Twitter)** uses the embed-widget syndication API
+  (`syndication.twitter.com/srv/timeline-profile/...`), which includes
+  likes/replies/retweets without auth. Impressions are absent for some posts;
+  those are excluded when sorting by views.
+- **Threads** answers GraphQL without login, but the profile-posts query's
+  `doc_id` rotates. The server tries a freshly discovered id first (scraped
+  daily from the public JS bundles), then known fallbacks; if all fail it
+  shows account shortcuts until Meta allows access again.
+- **TikTok**'s own APIs require request signing (X-Bogus/msToken) and TLS
+  fingerprinting, so the free **tikwm** API is used instead — it proxies the
+  signing and returns views/likes/comments/thumbnails/video URLs. Its free
+  tier throttles heavy concurrency, so the server fetches with low
+  parallelism and caches for an hour.
+
+## Development
+
+```bash
+python3 -m unittest discover -s tests -v   # parser & caching tests
+```
+
+CI (GitHub Actions) runs a syntax check plus the test suite on every push.
+
+Files created at runtime — `*_accounts.json`, `favorites.json`, `trends.db` —
+are personal state and gitignored.

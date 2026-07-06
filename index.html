@@ -1,16 +1,18 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>데일리 트렌드 뷰어</title>
+<title>Daily Trend Viewer</title>
+<link rel="icon" href="/favicon.ico">
 <style>
   :root {
     --bg: #0f1115; --panel: #171a21; --card: #1c2029; --border: #2a2f3a;
     --text: #e8eaf0; --muted: #9aa3b2; --accent: #ff4d6d; --accent2: #4d9fff;
+    --up: #2ecc71; --down: #ff6b6b; --star: #ffd166;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: -apple-system, "Apple SD Gothic Neo", "Pretendard", sans-serif; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
   header { position: sticky; top: 0; z-index: 50; background: rgba(15,17,21,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   header h1 { font-size: 20px; font-weight: 800; }
   header h1 span { color: var(--accent); }
@@ -22,6 +24,7 @@
   #refreshBtn { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
   #refreshBtn:hover { border-color: var(--accent2); }
   #updated { color: var(--muted); font-size: 12px; }
+  #updated.stale { color: var(--star); }
 
   .tabs { display: flex; gap: 8px; padding: 14px 24px 0; flex-wrap: wrap; }
   .tab { padding: 9px 18px; border-radius: 10px 10px 0 0; background: transparent; color: var(--muted); border: 1px solid transparent; border-bottom: none; cursor: pointer; font-size: 14px; font-weight: 700; }
@@ -31,6 +34,7 @@
   .chip { padding: 6px 13px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); color: var(--muted); font-size: 13px; cursor: pointer; white-space: nowrap; }
   .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
   .periods { display: flex; gap: 4px; margin-left: auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
+  .periods.inline { margin-left: 0; }
   .period { padding: 5px 12px; border-radius: 8px; background: transparent; border: none; color: var(--muted); font-size: 13px; cursor: pointer; }
   .period.active { background: var(--accent2); color: #fff; font-weight: 700; }
 
@@ -46,11 +50,23 @@
   .len { position: absolute; right: 8px; background: rgba(0,0,0,.8); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 5px; }
   .meta { padding: 10px 12px 12px; }
   .title { font-size: 13.5px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 36px; }
-  .sub { margin-top: 6px; color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 8px; }
+  .sub { margin-top: 6px; color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
   .views { color: var(--accent); font-weight: 700; }
   .status { padding: 60px 0; text-align: center; color: var(--muted); font-size: 15px; }
 
-  /* 외부 플랫폼(틱톡/릴스) 탭 */
+  /* trend deltas + sparklines */
+  .delta { font-weight: 700; font-size: 11.5px; padding: 1px 6px; border-radius: 6px; }
+  .delta.up { color: var(--up); background: rgba(46,204,113,.12); }
+  .delta.down { color: var(--down); background: rgba(255,107,107,.12); }
+  svg.spark { display: block; }
+  svg.spark polyline { fill: none; stroke: var(--accent2); stroke-width: 1.5; }
+
+  /* favorite star */
+  .fav { position: absolute; top: 8px; right: 8px; z-index: 5; background: rgba(0,0,0,.6); border: none; border-radius: 7px; color: #fff; font-size: 15px; padding: 2px 8px; cursor: pointer; }
+  .fav.on { color: var(--star); }
+  .postcard .fav { position: static; margin-left: auto; background: var(--panel); }
+
+  /* external platform tabs */
   .ext-section h2 { font-size: 16px; margin: 6px 0 12px; }
   .linkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 30px; }
   .linkcard { display: block; text-decoration: none; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 14px; color: var(--text); font-size: 14px; font-weight: 600; }
@@ -60,10 +76,8 @@
   .addbar input { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text); font-size: 14px; }
   .addbar button { background: var(--accent2); border: none; border-radius: 10px; padding: 10px 18px; color: #fff; font-weight: 700; cursor: pointer; }
   .note { color: var(--muted); font-size: 12.5px; margin-bottom: 18px; line-height: 1.6; }
-  .saved-card .del { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.7); color: #fff; border: none; border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 12px; display: none; }
-  .saved-card:hover .del { display: block; }
 
-  /* AI 탭 */
+  /* AI tab */
   .ai-section { margin-bottom: 34px; }
   .ai-section h2 { font-size: 16px; margin-bottom: 12px; }
   .ai-section h2 small { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
@@ -78,19 +92,17 @@
   .newslist { display: flex; flex-direction: column; gap: 6px; }
   .newsitem { display: flex; gap: 10px; align-items: baseline; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; text-decoration: none; color: var(--text); }
   .newsitem:hover { border-color: var(--accent); }
-  .newsitem .badge { flex-shrink: 0; font-size: 10.5px; font-weight: 700; border-radius: 6px; padding: 2px 7px; }
-  .badge.kr { background: rgba(255,77,109,.16); color: var(--accent); }
-  .badge.gl { background: rgba(77,159,255,.16); color: var(--accent2); }
+  .newsitem .badge { flex-shrink: 0; font-size: 10.5px; font-weight: 700; border-radius: 6px; padding: 2px 7px; background: rgba(77,159,255,.16); color: var(--accent2); }
   .newsitem .ntitle { font-size: 13.5px; line-height: 1.4; flex: 1; }
   .newsitem .nsrc { flex-shrink: 0; color: var(--muted); font-size: 12px; }
 
-  /* 릴스 탭 계정 관리 */
+  /* account chips */
   .acc-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .acc-chip { display: inline-flex; gap: 6px; align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 5px 7px 5px 12px; font-size: 12.5px; color: var(--text); }
   .acc-chip button { background: var(--panel); border: none; color: var(--muted); border-radius: 50%; width: 18px; height: 18px; cursor: pointer; font-size: 11px; line-height: 1; }
   .acc-chip button:hover { color: var(--accent); }
 
-  /* 정렬 접이식 메뉴 */
+  /* collapsible sort menu */
   .sortbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
   .sortmenu { position: relative; }
   .sortmenu > .sorttoggle { background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 10px; padding: 9px 15px; font-size: 13.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; }
@@ -106,7 +118,7 @@
   .sortlist button.sel .check { opacity: 1; }
   .sortcount { color: var(--muted); font-size: 12.5px; }
 
-  /* 소셜 포스트(X·스레드) 카드 */
+  /* social post (X / Threads) cards */
   .postlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
   .postcard { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 15px 16px; cursor: pointer; transition: border-color .12s, transform .12s; }
   .postcard:hover { border-color: var(--accent2); transform: translateY(-2px); }
@@ -114,14 +126,13 @@
   .postcard .prank { background: var(--panel); color: #ffd166; font-weight: 800; font-size: 12px; padding: 2px 9px; border-radius: 7px; }
   .postcard .prank.top { background: var(--accent); color: #fff; }
   .postcard .pacct { font-size: 13px; font-weight: 700; }
-  .postcard .pacct small { color: var(--muted); font-weight: 400; margin-left: 3px; }
   .postcard .ptext { font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
   .postcard .pmedia { margin-top: 10px; border-radius: 10px; width: 100%; max-height: 240px; object-fit: cover; background: #000; }
-  .postcard .pstats { display: flex; gap: 16px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+  .postcard .pstats { display: flex; gap: 16px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); flex-wrap: wrap; align-items: center; }
   .postcard .pstats b { color: var(--text); }
   .postcard .pstats .hot { color: var(--accent); }
 
-  /* 재생 모달 */
+  /* player modal */
   #modal { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 100; padding: 24px; }
   #modal.open { display: flex; }
   .modal-box { width: min(900px, 100%); }
@@ -134,138 +145,147 @@
 </head>
 <body>
 <header>
-  <h1>데일리 <span>트렌드</span> 뷰어</h1>
+  <h1>Daily <span>Trend</span> Viewer</h1>
   <div id="today"></div>
   <form id="searchForm">
-    <input id="searchInput" type="search" placeholder="유튜브 검색어 입력 (예: AI 광고)">
-    <button id="searchBtn" type="submit">🔍 검색</button>
+    <input id="searchInput" type="search" placeholder="Search YouTube (e.g. AI ads)">
+    <button id="searchBtn" type="submit">🔍 Search</button>
   </form>
-  <button id="refreshBtn">🔄 새로고침</button>
+  <button id="refreshBtn">🔄 Refresh</button>
   <div id="updated"></div>
 </header>
 
 <nav class="tabs" id="tabs">
-  <button class="tab active" data-tab="youtube">▶ 유튜브</button>
-  <button class="tab" data-tab="shorts">⚡ 쇼츠</button>
-  <button class="tab" data-tab="ai">🤖 AI 영상</button>
-  <button class="tab" data-tab="reels">📸 릴스</button>
-  <button class="tab" data-tab="x">𝕏 트위터</button>
-  <button class="tab" data-tab="threads">🧵 스레드</button>
-  <button class="tab" data-tab="tiktok">🎵 틱톡</button>
+  <button class="tab active" data-tab="youtube">▶ YouTube</button>
+  <button class="tab" data-tab="shorts">⚡ Shorts</button>
+  <button class="tab" data-tab="ai">🤖 AI Videos</button>
+  <button class="tab" data-tab="reels">📸 Reels</button>
+  <button class="tab" data-tab="x">𝕏 Twitter</button>
+  <button class="tab" data-tab="threads">🧵 Threads</button>
+  <button class="tab" data-tab="tiktok">🎵 TikTok</button>
+  <button class="tab" data-tab="saved">⭐ Saved</button>
 </nav>
 
 <div class="toolbar" id="toolbar">
   <div class="chips" id="chips"></div>
   <div class="periods" id="periods">
-    <button class="period" data-period="day">오늘</button>
-    <button class="period active" data-period="week">이번 주</button>
-    <button class="period" data-period="month">이번 달</button>
+    <button class="period" data-period="day">Today</button>
+    <button class="period active" data-period="week">This week</button>
+    <button class="period" data-period="month">This month</button>
   </div>
   <div class="sortmenu" id="vidSortMenu">
-    <button class="sorttoggle">정렬: <span class="curlabel">조회수순</span> <span class="caret">▼</span></button>
+    <button class="sorttoggle">Sort: <span class="curlabel">Views</span> <span class="caret">▼</span></button>
     <div class="sortlist"></div>
   </div>
 </div>
 
 <main>
   <div id="videoView">
-    <div class="status" id="status">불러오는 중...</div>
+    <div class="status" id="status">Loading...</div>
     <div class="grid" id="grid"></div>
   </div>
 
   <div id="aiView" style="display:none">
     <div class="ai-section">
-      <h2>🚀 새로 나온 영상 생성 모델 <small>Hugging Face · 최신 등록순</small></h2>
+      <h2>🚀 New video-generation models <small>Hugging Face · newest first</small></h2>
       <div class="modelrow" id="aiLatest"></div>
     </div>
     <div class="ai-section">
-      <h2>🔥 지금 뜨는 모델 <small>Hugging Face · 트렌딩</small></h2>
+      <h2>🔥 Trending models <small>Hugging Face · trending</small></h2>
       <div class="modelrow" id="aiTrending"></div>
     </div>
     <div class="ai-section">
-      <h2>📰 AI 영상 뉴스 <small>구글 뉴스 · 최신순</small></h2>
+      <h2>📰 AI video news <small>Google News · latest</small></h2>
       <div class="newslist" id="aiNews"></div>
     </div>
-    <p class="note">💡 인기 AI 영상은 <b>유튜브 탭 → 'AI' 카테고리</b>에서 조회수·좋아요순으로 볼 수 있어요.</p>
+    <p class="note">💡 Popular AI videos live under the <b>YouTube tab → "AI" category</b>, sorted by views/likes.</p>
     <div class="status" id="aiStatus" style="display:none"></div>
   </div>
 
   <div id="reelsView" class="ext-section" style="display:none">
-    <p class="note">인스타그램 웹 내부 API를 통해 등록된 계정들의 최신 릴스를 가져와 조회수순으로 정렬합니다. 아래에서 즐겨보는 크리에이터 계정을 자유롭게 추가·삭제하세요.</p>
-    <h2 style="font-size:16px;margin-bottom:10px">👤 구독 계정</h2>
+    <p class="note">Fetches the latest reels from your subscribed accounts through Instagram's web-internal API and ranks them by views. Add or remove creator accounts below.</p>
+    <h2 style="font-size:16px;margin-bottom:10px">👤 Subscribed accounts</h2>
     <div class="acc-chips" id="accChips"></div>
     <div class="addbar">
-      <input id="accInput" type="text" placeholder="인스타그램 계정명 (예: runwayapp)">
-      <button id="accAdd">계정 추가</button>
+      <input id="accInput" type="text" placeholder="Instagram username (e.g. runwayapp)">
+      <button id="accAdd">Add account</button>
     </div>
-    <h2 style="font-size:16px;margin:22px 0 12px">📸 인기 릴스</h2>
+    <h2 style="font-size:16px;margin:22px 0 12px">📸 Top reels</h2>
     <div class="sortbar">
       <div class="sortmenu" id="reelsSortMenu">
-        <button class="sorttoggle">정렬: <span class="curlabel">조회수순</span> <span class="caret">▼</span></button>
+        <button class="sorttoggle">Sort: <span class="curlabel">Views</span> <span class="caret">▼</span></button>
         <div class="sortlist"></div>
       </div>
+      <div class="periods inline" id="reelsPeriods"></div>
       <span class="sortcount" id="reelsCount"></span>
     </div>
-    <div class="status" id="reelsStatus">불러오는 중...</div>
+    <div class="status" id="reelsStatus">Loading...</div>
     <div class="grid shorts" id="reelsGrid"></div>
   </div>
 
   <div id="xView" class="ext-section" style="display:none">
-    <p class="note">트위터 임베드용 공개 API(무인증)로 구독 계정들의 최신 트윗을 참여수와 함께 가져옵니다. 아래 정렬 메뉴로 좋아요·댓글·리트윗순으로 바이럴 글을 볼 수 있습니다.</p>
-    <h2 style="font-size:16px;margin-bottom:10px">👤 구독 계정</h2>
+    <p class="note">Fetches recent tweets with engagement counts from Twitter's public embed API (no login). Use the sort menu to surface viral posts by likes, replies, or retweets.</p>
+    <h2 style="font-size:16px;margin-bottom:10px">👤 Subscribed accounts</h2>
     <div class="acc-chips" id="xChips"></div>
     <div class="addbar">
-      <input id="xInput" type="text" placeholder="X(트위터) 계정명 (예: OpenAI)">
-      <button id="xAdd">계정 추가</button>
+      <input id="xInput" type="text" placeholder="X (Twitter) username (e.g. OpenAI)">
+      <button id="xAdd">Add account</button>
     </div>
     <div class="sortbar" style="margin-top:20px">
       <div class="sortmenu" id="xSortMenu">
-        <button class="sorttoggle">정렬: <span class="curlabel">좋아요순</span> <span class="caret">▼</span></button>
+        <button class="sorttoggle">Sort: <span class="curlabel">Likes</span> <span class="caret">▼</span></button>
         <div class="sortlist"></div>
       </div>
       <span class="sortcount" id="xCount"></span>
     </div>
-    <div class="status" id="xStatus">불러오는 중...</div>
+    <div class="status" id="xStatus">Loading...</div>
     <div class="postlist" id="xList"></div>
   </div>
 
   <div id="threadsView" class="ext-section" style="display:none">
-    <p class="note">스레드는 인스타그램(메타)과 같은 백엔드를 씁니다. 로그인 없이 실시간 조회를 시도하며, 메타의 보안 정책상 조회가 막힌 경우 계정 바로가기로 안내합니다.</p>
-    <h2 style="font-size:16px;margin-bottom:10px">👤 구독 계정</h2>
+    <p class="note">Threads shares Instagram's (Meta's) backend. Live lookup without login is attempted — including automatic discovery of the current API doc_id — and when Meta blocks it, account shortcuts are shown instead.</p>
+    <h2 style="font-size:16px;margin-bottom:10px">👤 Subscribed accounts</h2>
     <div class="acc-chips" id="thChips"></div>
     <div class="addbar">
-      <input id="thInput" type="text" placeholder="스레드 계정명 (예: openai)">
-      <button id="thAdd">계정 추가</button>
+      <input id="thInput" type="text" placeholder="Threads username (e.g. openai)">
+      <button id="thAdd">Add account</button>
     </div>
     <div class="sortbar" style="margin-top:20px">
       <div class="sortmenu" id="thSortMenu">
-        <button class="sorttoggle">정렬: <span class="curlabel">좋아요순</span> <span class="caret">▼</span></button>
+        <button class="sorttoggle">Sort: <span class="curlabel">Likes</span> <span class="caret">▼</span></button>
         <div class="sortlist"></div>
       </div>
       <span class="sortcount" id="thCount"></span>
     </div>
-    <div class="status" id="thStatus">불러오는 중...</div>
+    <div class="status" id="thStatus">Loading...</div>
     <div class="postlist" id="thList"></div>
     <div id="thFallback" style="display:none"></div>
   </div>
 
   <div id="tiktokView" class="ext-section" style="display:none">
-    <p class="note">틱톡 실시간 인기 피드(지역: 한국)와 구독 계정들의 최신 영상을 조회수·좋아요·댓글순으로 모아 보여줍니다. 아래에서 계정을 자유롭게 추가·삭제하세요.</p>
-    <h2 style="font-size:16px;margin-bottom:10px">👤 구독 계정</h2>
+    <p class="note">Combines TikTok's live trending feed with your subscribed accounts' latest videos, ranked by views, likes, or comments. Add or remove accounts below.</p>
+    <h2 style="font-size:16px;margin-bottom:10px">👤 Subscribed accounts</h2>
     <div class="acc-chips" id="ttChips"></div>
     <div class="addbar">
-      <input id="ttInput" type="text" placeholder="틱톡 계정명 (@ 없이, 예: khaby.lame)">
-      <button id="ttAdd">계정 추가</button>
+      <input id="ttInput" type="text" placeholder="TikTok username (without @, e.g. khaby.lame)">
+      <button id="ttAdd">Add account</button>
     </div>
     <div class="sortbar" style="margin-top:20px">
       <div class="sortmenu" id="ttSortMenu">
-        <button class="sorttoggle">정렬: <span class="curlabel">조회수순</span> <span class="caret">▼</span></button>
+        <button class="sorttoggle">Sort: <span class="curlabel">Views</span> <span class="caret">▼</span></button>
         <div class="sortlist"></div>
       </div>
+      <div class="periods inline" id="ttPeriods"></div>
       <span class="sortcount" id="ttCount"></span>
     </div>
-    <div class="status" id="ttStatus">불러오는 중...</div>
+    <div class="status" id="ttStatus">Loading...</div>
     <div class="grid shorts" id="ttGrid"></div>
+  </div>
+
+  <div id="savedView" class="ext-section" style="display:none">
+    <p class="note">Everything you star across the tabs lands here, saved to <b>favorites.json</b> next to the server. Click a card to open it; click ★ to remove.</p>
+    <div class="status" id="savedStatus" style="display:none"></div>
+    <div class="grid" id="savedGrid"></div>
   </div>
 </main>
 
@@ -273,25 +293,82 @@
   <div class="modal-box" id="modalBox">
     <iframe class="player" id="player" allow="autoplay; encrypted-media" allowfullscreen></iframe>
     <div class="modal-actions">
-      <a id="openExternal" target="_blank" rel="noopener">유튜브에서 열기 ↗</a>
-      <button id="closeModal">닫기</button>
+      <a id="openExternal" target="_blank" rel="noopener">Open on YouTube ↗</a>
+      <button id="closeModal">Close</button>
     </div>
   </div>
 </div>
 
 <script>
-const state = { tab: 'youtube', category: '전체', period: 'week', categories: ['전체'], search: '' };
+const state = { tab: 'youtube', category: 'All', period: 'week', categories: ['All'], search: '' };
 
-const fmt = n => {
-  if (n >= 1e8) return (n / 1e8).toFixed(1).replace(/\.0$/, '') + '억회';
-  if (n >= 1e4) return (n / 1e4).toFixed(1).replace(/\.0$/, '') + '만회';
-  return n.toLocaleString('ko-KR') + '회';
+const fmtN = n => {
+  n = n || 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  return n.toLocaleString('en-US');
 };
 
 document.getElementById('today').textContent =
-  new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+  new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
 
-/* ---------- 카테고리 칩 ---------- */
+function setUpdated(data) {
+  const el = document.getElementById('updated');
+  const t = new Date(data.fetchedAt * 1000).toLocaleTimeString('en-US');
+  el.classList.toggle('stale', !!data.stale);
+  el.textContent = data.stale ? `⚠️ refresh failed — cached data from ${t}` : 'Updated: ' + t;
+}
+
+/* ---------- trend deltas & sparklines ---------- */
+function deltaHTML(item) {
+  const d = item.delta;
+  if (d === undefined || d === 0) return '';
+  const up = d > 0;
+  return `<span class="delta ${up ? 'up' : 'down'}" title="vs previous day">${up ? '▲' : '▼'} ${fmtN(Math.abs(d))}</span>`;
+}
+function sparkHTML(item) {
+  const h = item.history;
+  if (!h || h.length < 3) return '';
+  const w = 56, ht = 16, min = Math.min(...h), max = Math.max(...h);
+  const span = max - min || 1;
+  const pts = h.map((v, i) =>
+    `${(w * i / (h.length - 1)).toFixed(1)},${(ht - 2 - (ht - 4) * (v - min) / span).toFixed(1)}`).join(' ');
+  return `<svg class="spark" width="${w}" height="${ht}" title="daily trend"><polyline points="${pts}"/></svg>`;
+}
+
+/* ---------- favorites ---------- */
+let favSet = new Set();
+async function loadFavSet() {
+  try {
+    const data = await (await fetch('/api/favorites')).json();
+    favSet = new Set((data.items || []).map(i => i.url));
+  } catch (e) { /* favorites are non-critical */ }
+}
+function favButton(item, onChange) {
+  const b = document.createElement('button');
+  const sync = () => { b.className = 'fav' + (favSet.has(item.url) ? ' on' : ''); b.textContent = favSet.has(item.url) ? '★' : '☆'; };
+  sync();
+  b.title = 'Save / unsave';
+  b.onclick = async ev => {
+    ev.stopPropagation();
+    const action = favSet.has(item.url) ? 'remove' : 'add';
+    if (action === 'add') favSet.add(item.url); else favSet.delete(item.url);
+    sync();
+    if (onChange) onChange();
+    try {
+      await fetch('/api/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, item }) });
+    } catch (e) { /* keep optimistic state */ }
+  };
+  return b;
+}
+function favPayload(platform, o) {
+  return { platform, id: String(o.id || ''), title: o.title || o.text || '', account: o.account || o.channel || '',
+           url: o.url, thumbnail: o.thumbnail || o.media || '', views: o.views || 0, likes: o.likes || 0 };
+}
+
+/* ---------- category chips ---------- */
 async function initCategories() {
   const res = await fetch('/api/categories');
   state.categories = (await res.json()).categories;
@@ -313,7 +390,7 @@ function renderChips() {
   });
 }
 
-/* ---------- 유튜브/쇼츠 영상 ---------- */
+/* ---------- YouTube / Shorts ---------- */
 let loadSeq = 0;
 let vidData = [];
 let vidHasLikes = false;
@@ -327,8 +404,8 @@ async function loadVideos(force = false) {
   grid.innerHTML = '';
   status.style.display = 'block';
   status.textContent = wantLikes
-    ? '좋아요 수를 불러오는 중입니다... (영상마다 조회하느라 조금 걸려요)'
-    : '영상을 불러오는 중입니다...';
+    ? 'Loading like counts... (each video is fetched individually, this takes a moment)'
+    : 'Loading videos...';
   const q = new URLSearchParams({
     category: state.category, period: state.period,
     shorts: state.tab === 'shorts' ? '1' : '0', force: force ? '1' : '0',
@@ -337,17 +414,16 @@ async function loadVideos(force = false) {
   try {
     const res = await fetch('/api/videos?' + q);
     const data = await res.json();
-    if (seq !== loadSeq) return; // 더 최신 요청이 있으면 무시
-    document.getElementById('updated').textContent =
-      '업데이트: ' + new Date(data.fetchedAt * 1000).toLocaleTimeString('ko-KR');
+    if (seq !== loadSeq) return; // a newer request superseded this one
+    setUpdated(data);
     vidData = data.videos;
     vidHasLikes = wantLikes;
-    if (!vidData.length) { status.style.display = 'block'; status.textContent = '결과가 없습니다.'; return; }
+    if (!vidData.length) { status.style.display = 'block'; status.textContent = 'No results.'; return; }
     status.style.display = 'none';
     renderVideos();
   } catch (e) {
     if (seq !== loadSeq) return;
-    status.textContent = '불러오기에 실패했습니다. 네트워크를 확인해 주세요.';
+    status.textContent = 'Failed to load. Please check your network.';
   }
 }
 function renderVideos() {
@@ -361,28 +437,32 @@ function renderVideos() {
 function videoCard(v, rank) {
   const el = document.createElement('div');
   el.className = 'card';
-  const likeStr = v.likes ? `<span class="views">👍 ${fmt2(v.likes)}</span>` : '';
+  const likeStr = v.likes ? `<span class="views">👍 ${fmtN(v.likes)}</span>` : '';
   el.innerHTML = `
     <div style="position:relative">
       <img class="thumb" loading="lazy" src="${v.thumbnail}" alt="">
-      <div class="rank${rank <= 3 ? ' top' : ''}">${rank}위</div>
+      <div class="rank${rank <= 3 ? ' top' : ''}">#${rank}</div>
       ${v.length ? `<div class="len" style="bottom:8px">${v.length}</div>` : ''}
     </div>
     <div class="meta">
       <div class="title"></div>
       <div class="sub">
-        <span class="${vidState.sort === 'views' ? 'views' : ''}">조회수 ${fmt(v.views)}</span>
+        <span class="${vidState.sort === 'views' ? 'views' : ''}">${fmtN(v.views)} views</span>
         ${likeStr}
+        ${deltaHTML(v)}
         <span class="chn"></span><span>${v.published || ''}</span>
+        ${sparkHTML(v)}
       </div>
     </div>`;
   el.querySelector('.title').textContent = v.title;
   el.querySelector('.chn').textContent = v.channel;
+  v.url = `https://www.youtube.com/watch?v=${v.id}`;
+  el.appendChild(favButton(favPayload(state.tab, v)));
   el.onclick = () => openPlayer(v.id, state.tab === 'shorts');
   return el;
 }
 
-/* ---------- 재생 모달 ---------- */
+/* ---------- player modal ---------- */
 function openPlayer(id, vertical) {
   document.getElementById('modalBox').className = 'modal-box' + (vertical ? ' vertical' : '');
   document.getElementById('player').src = `https://www.youtube.com/embed/${id}?autoplay=1`;
@@ -396,20 +476,19 @@ function closePlayer() {
 document.getElementById('closeModal').onclick = closePlayer;
 document.getElementById('modal').onclick = e => { if (e.target.id === 'modal') closePlayer(); };
 
-/* ---------- AI 영상 탭 ---------- */
+/* ---------- AI tab ---------- */
 let aiLoaded = false;
 async function loadAI(force = false) {
   const status = document.getElementById('aiStatus');
   if (force || !aiLoaded) {
     status.style.display = 'block';
-    status.textContent = 'AI 소식을 불러오는 중입니다...';
+    status.textContent = 'Loading AI news...';
   }
   try {
     const data = await (await fetch('/api/ai' + (force ? '?force=1' : ''))).json();
     aiLoaded = true;
     status.style.display = 'none';
-    document.getElementById('updated').textContent =
-      '업데이트: ' + new Date(data.fetchedAt * 1000).toLocaleTimeString('ko-KR');
+    setUpdated(data);
     renderModels('aiLatest', data.models.latest);
     renderModels('aiTrending', data.models.trending);
     const nl = document.getElementById('aiNews');
@@ -417,7 +496,7 @@ async function loadAI(force = false) {
     data.news.slice(0, 20).forEach(n => {
       const a = document.createElement('a');
       a.className = 'newsitem'; a.href = n.link; a.target = '_blank'; a.rel = 'noopener';
-      a.innerHTML = `<span class="badge ${n.region === '국내' ? 'kr' : 'gl'}">${n.region}</span>
+      a.innerHTML = `<span class="badge">${n.region}</span>
         <span class="ntitle"></span><span class="nsrc"></span>`;
       a.querySelector('.ntitle').textContent = n.title;
       a.querySelector('.nsrc').textContent = (n.source ? n.source + ' · ' : '') + timeAgo(n.ts);
@@ -425,7 +504,7 @@ async function loadAI(force = false) {
     });
   } catch (e) {
     status.style.display = 'block';
-    status.textContent = '불러오기에 실패했습니다. 네트워크를 확인해 주세요.';
+    status.textContent = 'Failed to load. Please check your network.';
   }
 }
 function renderModels(elId, models) {
@@ -439,9 +518,9 @@ function renderModels(elId, models) {
     const t2v = m.pipeline === 'text-to-video';
     a.innerHTML = `<div class="mid"></div>
       <div class="msub">
-        <span class="pill ${t2v ? 't2v' : 'i2v'}">${t2v ? '텍스트→영상' : '이미지→영상'}</span>
-        <span>❤️ ${m.likes.toLocaleString()}</span>
-        <span>⬇️ ${m.downloads.toLocaleString()}</span>
+        <span class="pill ${t2v ? 't2v' : 'i2v'}">${t2v ? 'text→video' : 'image→video'}</span>
+        <span>❤️ ${m.likes.toLocaleString('en-US')}</span>
+        <span>⬇️ ${m.downloads.toLocaleString('en-US')}</span>
         <span>${m.createdAt ? m.createdAt.slice(0, 10) : ''}</span>
       </div>`;
     a.querySelector('.mid').textContent = m.id;
@@ -451,42 +530,72 @@ function renderModels(elId, models) {
 function timeAgo(ts) {
   if (!ts) return '';
   const s = Date.now() / 1000 - ts;
-  if (s < 3600) return Math.max(1, Math.floor(s / 60)) + '분 전';
-  if (s < 86400) return Math.floor(s / 3600) + '시간 전';
-  return Math.floor(s / 86400) + '일 전';
+  if (s < 3600) return Math.max(1, Math.floor(s / 60)) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
 }
 
-/* ---------- 인스타 릴스 탭 ---------- */
+/* ---------- client-side filters (search text + time period) ---------- */
+function textMatch(o, q) {
+  if (!q) return true;
+  q = q.toLowerCase();
+  return (o.title || '').toLowerCase().includes(q)
+      || (o.text || '').toLowerCase().includes(q)
+      || (o.account || '').toLowerCase().includes(q);
+}
+const PERIOD_SECS = { day: 86400, week: 7 * 86400, month: 30 * 86400 };
+function periodMatch(ts, period) {
+  if (!period || period === 'all') return true;
+  if (!ts) return false;
+  return Date.now() / 1000 - ts <= PERIOD_SECS[period];
+}
+function initPeriodChips(elId, stateObj, onPick) {
+  const box = document.getElementById(elId);
+  box.innerHTML = '';
+  [['all', 'All'], ['day', 'Today'], ['week', 'Week'], ['month', 'Month']].forEach(([key, label]) => {
+    const b = document.createElement('button');
+    b.className = 'period' + (stateObj.period === key ? ' active' : '');
+    b.textContent = label;
+    b.onclick = () => {
+      stateObj.period = key;
+      box.querySelectorAll('.period').forEach(x => x.classList.toggle('active', x === b));
+      onPick();
+    };
+    box.appendChild(b);
+  });
+}
+
+/* ---------- Instagram Reels ---------- */
 let reelsData = [];
-const reelsState = { sort: 'views' };  // views | likes | comments
+const reelsState = { sort: 'views', period: 'all' };  // views | likes | comments
 async function loadReels(force = false) {
   const status = document.getElementById('reelsStatus');
   const grid = document.getElementById('reelsGrid');
   status.style.display = 'block';
-  status.textContent = '릴스를 불러오는 중입니다... (계정이 많으면 수십 초 걸릴 수 있어요)';
+  status.textContent = 'Loading reels... (many accounts can take tens of seconds)';
   grid.innerHTML = '';
   try {
     const data = await (await fetch('/api/reels' + (force ? '?force=1' : ''))).json();
     renderAccountChips(data.accounts);
-    document.getElementById('updated').textContent =
-      '업데이트: ' + new Date(data.fetchedAt * 1000).toLocaleTimeString('ko-KR');
+    setUpdated(data);
     reelsData = data.reels || [];
     if (!reelsData.length) {
       document.getElementById('reelsCount').textContent = '';
-      status.textContent = '가져온 릴스가 없습니다. 계정을 추가해 보시거나, 잠시 후 새로고침해 주세요. (인스타그램이 일시적으로 요청을 제한하는 경우가 있습니다)';
+      status.textContent = 'No reels fetched. Try adding accounts or refresh in a bit — Instagram sometimes rate-limits anonymous requests.';
       return;
     }
     status.style.display = 'none';
     renderReels();
   } catch (e) {
-    status.textContent = '불러오기에 실패했습니다. 네트워크를 확인해 주세요.';
+    status.textContent = 'Failed to load. Please check your network.';
   }
 }
 function renderReels() {
   const grid = document.getElementById('reelsGrid');
   const f = reelsState.sort;
-  const label = { views: '조회수', likes: '좋아요', comments: '댓글' };
-  const sorted = reelsData.slice().sort((a, b) => (b[f] || 0) - (a[f] || 0));
+  const label = { views: 'views', likes: 'likes', comments: 'comments' };
+  const rows = reelsData.filter(r => textMatch(r, state.search) && periodMatch(r.takenAt, reelsState.period));
+  const sorted = rows.slice().sort((a, b) => (b[f] || 0) - (a[f] || 0));
   grid.innerHTML = '';
   sorted.forEach((r, i) => {
     const el = document.createElement('div');
@@ -494,23 +603,25 @@ function renderReels() {
     el.innerHTML = `
       <div style="position:relative">
         <img class="thumb" loading="lazy" src="/api/img?u=${encodeURIComponent(r.thumbnail)}" alt="">
-        <div class="rank${i < 3 ? ' top' : ''}">${i + 1}위</div>
+        <div class="rank${i < 3 ? ' top' : ''}">#${i + 1}</div>
       </div>
       <div class="meta">
         <div class="title"></div>
         <div class="sub">
-          <span class="${f === 'views' ? 'views' : ''}">👁️ ${fmt2(r.views)}</span>
-          <span class="${f === 'likes' ? 'views' : ''}">❤️ ${fmt2(r.likes || 0)}</span>
-          <span class="${f === 'comments' ? 'views' : ''}">💬 ${fmt2(r.comments || 0)}</span>
+          <span class="${f === 'views' ? 'views' : ''}">👁️ ${fmtN(r.views)}</span>
+          <span class="${f === 'likes' ? 'views' : ''}">❤️ ${fmtN(r.likes || 0)}</span>
+          <span class="${f === 'comments' ? 'views' : ''}">💬 ${fmtN(r.comments || 0)}</span>
+          ${deltaHTML(r)} ${sparkHTML(r)}
         </div>
         <div class="sub" style="margin-top:3px"><span>@${r.account}</span></div>
       </div>`;
     el.querySelector('.title').textContent = r.title;
+    el.appendChild(favButton(favPayload('reels', r)));
     el.onclick = () => window.open(r.url, '_blank');
     grid.appendChild(el);
   });
   document.getElementById('reelsCount').textContent =
-    `${label[f]} 기준 · 총 ${sorted.length}개`;
+    `by ${label[f]} · ${sorted.length} reels`;
 }
 function renderAccountChips(accounts) {
   const box = document.getElementById('accChips');
@@ -518,7 +629,7 @@ function renderAccountChips(accounts) {
   accounts.forEach(name => {
     const chip = document.createElement('span');
     chip.className = 'acc-chip';
-    chip.innerHTML = `@<b></b><button title="삭제">✕</button>`;
+    chip.innerHTML = `@<b></b><button title="Remove">✕</button>`;
     chip.querySelector('b').textContent = name;
     chip.querySelector('button').onclick = () => updateAccount('remove', name);
     box.appendChild(chip);
@@ -542,12 +653,12 @@ document.getElementById('accInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('accAdd').click();
 });
 
-/* ---------- 소셜(X·스레드) 공통: 접이식 정렬 + 포스트 카드 ---------- */
+/* ---------- social (X / Threads): sort menus + post cards ---------- */
 const SORT_OPTS = {
-  likes: { label: '좋아요순', icon: '❤️', field: 'likes' },
-  replies: { label: '댓글순', icon: '💬', field: 'replies' },
-  reposts: { label: '리트윗순', icon: '🔁', field: 'retweets' },
-  views: { label: '조회수순', icon: '👁️', field: 'views' },
+  likes: { label: 'Likes', icon: '❤️', field: 'likes' },
+  replies: { label: 'Replies', icon: '💬', field: 'replies' },
+  reposts: { label: 'Reposts', icon: '🔁', field: 'retweets' },
+  views: { label: 'Views', icon: '👁️', field: 'views' },
 };
 const social = {
   x: { data: [], sort: 'likes', opts: ['likes', 'replies', 'reposts', 'views'], repostField: 'retweets' },
@@ -561,7 +672,7 @@ function buildSortMenu(kind, menuId, onPick) {
   list.innerHTML = '';
   cfg.opts.forEach(key => {
     const o = SORT_OPTS[key];
-    const label = key === 'reposts' ? (kind === 'threads' ? '리포스트순' : '리트윗순') : o.label;
+    const label = key === 'reposts' ? (kind === 'threads' ? 'Reposts' : 'Retweets') : o.label;
     const b = document.createElement('button');
     b.className = key === cfg.sort ? 'sel' : '';
     b.innerHTML = `<span>${o.icon}</span><span>${label}</span><span class="check">✓</span>`;
@@ -591,40 +702,36 @@ function postCard(p, rank, kind) {
   const el = document.createElement('div');
   el.className = 'postcard';
   const rt = kind === 'threads' ? (p.reposts || 0) : (p.retweets || 0);
-  const rtIcon = kind === 'threads' ? '🔁' : '🔁';
   const active = social[kind].sort;
   el.innerHTML = `
     <div class="phead">
-      <span class="prank${rank <= 3 ? ' top' : ''}">${rank}위</span>
-      <span class="pacct">${kind === 'x' ? '@' : '@'}${p.account}</span>
+      <span class="prank${rank <= 3 ? ' top' : ''}">#${rank}</span>
+      <span class="pacct">@${p.account}</span>
     </div>
     <div class="ptext"></div>
     ${p.media ? `<img class="pmedia" loading="lazy" src="/api/img?u=${encodeURIComponent(p.media)}" alt="">` : ''}
     <div class="pstats">
-      <span class="${active === 'likes' ? 'hot' : ''}">❤️ <b>${fmt2(p.likes)}</b></span>
-      <span class="${active === 'replies' ? 'hot' : ''}">💬 <b>${fmt2(p.replies)}</b></span>
-      <span class="${active === 'reposts' ? 'hot' : ''}">${rtIcon} <b>${fmt2(rt)}</b></span>
-      ${p.views ? `<span class="${active === 'views' ? 'hot' : ''}">👁️ <b>${fmt2(p.views)}</b></span>` : ''}
+      <span class="${active === 'likes' ? 'hot' : ''}">❤️ <b>${fmtN(p.likes)}</b></span>
+      <span class="${active === 'replies' ? 'hot' : ''}">💬 <b>${fmtN(p.replies)}</b></span>
+      <span class="${active === 'reposts' ? 'hot' : ''}">🔁 <b>${fmtN(rt)}</b></span>
+      ${p.views ? `<span class="${active === 'views' ? 'hot' : ''}">👁️ <b>${fmtN(p.views)}</b></span>` : ''}
+      ${deltaHTML(p)} ${sparkHTML(p)}
     </div>`;
   el.querySelector('.ptext').textContent = p.text;
+  el.querySelector('.phead').appendChild(favButton(favPayload(kind, p)));
   el.onclick = () => window.open(p.url, '_blank');
   return el;
 }
-const fmt2 = n => {
-  if (n >= 1e8) return (n / 1e8).toFixed(1).replace(/\.0$/, '') + '억';
-  if (n >= 1e4) return (n / 1e4).toFixed(1).replace(/\.0$/, '') + '만';
-  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + '천';
-  return (n || 0).toLocaleString('ko-KR');
-};
 
 function renderSocial(kind) {
   const listEl = document.getElementById(kind === 'x' ? 'xList' : 'thList');
   const cntEl = document.getElementById(kind === 'x' ? 'xCount' : 'thCount');
   const f = sortField(kind);
-  const sorted = social[kind].data.slice().sort((a, b) => (b[f] || 0) - (a[f] || 0));
+  const rows = social[kind].data.filter(p => textMatch(p, state.search));
+  const sorted = rows.slice().sort((a, b) => (b[f] || 0) - (a[f] || 0));
   listEl.innerHTML = '';
   sorted.forEach((p, i) => listEl.appendChild(postCard(p, i + 1, kind)));
-  cntEl.textContent = sorted.length ? `총 ${sorted.length}개 글` : '';
+  cntEl.textContent = sorted.length ? `${sorted.length} posts` : '';
 }
 
 async function loadSocial(kind, force = false) {
@@ -632,38 +739,37 @@ async function loadSocial(kind, force = false) {
   const listEl = document.getElementById(kind === 'x' ? 'xList' : 'thList');
   const chipsId = kind === 'x' ? 'xChips' : 'thChips';
   statusEl.style.display = 'block';
-  statusEl.textContent = '불러오는 중입니다... (계정이 많으면 수십 초 걸릴 수 있어요)';
+  statusEl.textContent = 'Loading... (many accounts can take tens of seconds)';
   listEl.innerHTML = '';
   if (kind === 'threads') document.getElementById('thFallback').style.display = 'none';
   try {
     const data = await (await fetch('/api/' + kind + (force ? '?force=1' : ''))).json();
     renderAccChips(chipsId, kind, data.accounts);
-    document.getElementById('updated').textContent =
-      '업데이트: ' + new Date(data.fetchedAt * 1000).toLocaleTimeString('ko-KR');
+    setUpdated(data);
     social[kind].data = data.posts || [];
     if (!social[kind].data.length) {
       statusEl.style.display = 'none';
       if (kind === 'threads') showThreadsFallback(data.accounts);
-      else statusEl.style.display = 'block', statusEl.textContent = '가져온 글이 없습니다. 계정을 확인하거나 잠시 후 새로고침해 주세요.';
+      else { statusEl.style.display = 'block'; statusEl.textContent = 'No posts fetched. Check the accounts or refresh in a bit.'; }
       return;
     }
     statusEl.style.display = 'none';
     renderSocial(kind);
   } catch (e) {
-    statusEl.textContent = '불러오기에 실패했습니다. 네트워크를 확인해 주세요.';
+    statusEl.textContent = 'Failed to load. Please check your network.';
   }
 }
 function showThreadsFallback(accounts) {
   const box = document.getElementById('thFallback');
   box.style.display = 'block';
-  box.innerHTML = `<p class="note" style="margin-top:4px">⚠️ 지금은 스레드가 로그인 없는 조회를 차단하고 있어 실시간 글을 가져오지 못했습니다. 아래에서 각 계정을 바로 열어볼 수 있습니다. (메타가 접근을 다시 허용하면 자동으로 목록이 채워집니다.)</p>
+  box.innerHTML = `<p class="note" style="margin-top:4px">⚠️ Threads is currently blocking anonymous reads, so live posts couldn't be fetched. Open each account directly below — the list fills in automatically once Meta allows access again.</p>
     <div class="linkgrid"></div>`;
   const grid = box.querySelector('.linkgrid');
   accounts.forEach(name => {
     const a = document.createElement('a');
     a.className = 'linkcard'; a.href = 'https://www.threads.com/@' + name;
     a.target = '_blank'; a.rel = 'noopener';
-    a.innerHTML = `🧵 @${name}<small>스레드에서 열기 ↗</small>`;
+    a.innerHTML = `🧵 @${name}<small>Open on Threads ↗</small>`;
     grid.appendChild(a);
   });
 }
@@ -673,7 +779,7 @@ function renderAccChips(elId, kind, accounts) {
   accounts.forEach(name => {
     const chip = document.createElement('span');
     chip.className = 'acc-chip';
-    chip.innerHTML = `@<b></b><button title="삭제">✕</button>`;
+    chip.innerHTML = `@<b></b><button title="Remove">✕</button>`;
     chip.querySelector('b').textContent = name;
     chip.querySelector('button').onclick = () => updateSocialAccount(kind, 'remove', name);
     box.appendChild(chip);
@@ -701,9 +807,9 @@ function wireSocial(kind, inputId, addId, menuId) {
 wireSocial('x', 'xInput', 'xAdd', 'xSortMenu');
 wireSocial('threads', 'thInput', 'thAdd', 'thSortMenu');
 
-/* ---------- 유튜브/쇼츠 · 릴스 정렬 접이식 메뉴 ---------- */
+/* ---------- collapsible sort menus for YouTube/Shorts & Reels ---------- */
 function initFoldMenu(menuId, options, stateObj, onPick) {
-  // options: [{key, label, icon}]  / stateObj.sort 를 갱신
+  // options: [{key, label, icon}] — updates stateObj.sort
   const menu = document.getElementById(menuId);
   const list = menu.querySelector('.sortlist');
   list.innerHTML = '';
@@ -729,53 +835,54 @@ function initFoldMenu(menuId, options, stateObj, onPick) {
   };
 }
 
-// 유튜브/쇼츠: 조회수순 / 좋아요순 (좋아요는 서버가 영상마다 조회해 보강 → 다시 로드)
+// YouTube/Shorts: views / likes (likes are enriched server-side per video → reload)
 initFoldMenu('vidSortMenu', [
-  { key: 'views', label: '조회수순', icon: '👁️' },
-  { key: 'likes', label: '좋아요순', icon: '👍' },
+  { key: 'views', label: 'Views', icon: '👁️' },
+  { key: 'likes', label: 'Likes', icon: '👍' },
 ], vidState, () => {
-  if (vidState.sort === 'likes' && !vidHasLikes) loadVideos();  // 좋아요 데이터 없으면 재요청
+  if (vidState.sort === 'likes' && !vidHasLikes) loadVideos();  // re-request if likes missing
   else renderVideos();
 });
 
-// 릴스: 조회수순 / 좋아요순 / 댓글순 (전부 이미 받은 데이터로 즉시 재정렬)
+// Reels: views / likes / comments (already loaded — instant re-sort)
 initFoldMenu('reelsSortMenu', [
-  { key: 'views', label: '조회수순', icon: '👁️' },
-  { key: 'likes', label: '좋아요순', icon: '❤️' },
-  { key: 'comments', label: '댓글순', icon: '💬' },
+  { key: 'views', label: 'Views', icon: '👁️' },
+  { key: 'likes', label: 'Likes', icon: '❤️' },
+  { key: 'comments', label: 'Comments', icon: '💬' },
 ], reelsState, () => renderReels());
+initPeriodChips('reelsPeriods', reelsState, () => renderReels());
 
-/* ---------- 틱톡 탭 (tikwm 실시간) ---------- */
+/* ---------- TikTok ---------- */
 let tiktokData = [];
-const tiktokState = { sort: 'views' };  // views | likes | comments
+const tiktokState = { sort: 'views', period: 'all' };  // views | likes | comments
 async function loadTikTok(force = false) {
   const status = document.getElementById('ttStatus');
   const grid = document.getElementById('ttGrid');
   status.style.display = 'block';
-  status.textContent = '틱톡 인기 영상을 불러오는 중입니다... (처음엔 10~20초 걸릴 수 있어요)';
+  status.textContent = 'Loading trending TikToks... (the first load can take 10–20s)';
   grid.innerHTML = '';
   try {
     const data = await (await fetch('/api/tiktok' + (force ? '?force=1' : ''))).json();
     renderTtChips(data.accounts);
-    document.getElementById('updated').textContent =
-      '업데이트: ' + new Date(data.fetchedAt * 1000).toLocaleTimeString('ko-KR');
+    setUpdated(data);
     tiktokData = data.posts || [];
     if (!tiktokData.length) {
       document.getElementById('ttCount').textContent = '';
-      status.textContent = '가져온 영상이 없습니다. 잠시 후 새로고침해 주세요. (무료 API가 일시적으로 제한되는 경우가 있습니다)';
+      status.textContent = 'No videos fetched. Refresh in a bit — the free API is occasionally rate-limited.';
       return;
     }
     status.style.display = 'none';
     renderTikTok();
   } catch (e) {
-    status.textContent = '불러오기에 실패했습니다. 네트워크를 확인해 주세요.';
+    status.textContent = 'Failed to load. Please check your network.';
   }
 }
 function renderTikTok() {
   const grid = document.getElementById('ttGrid');
   const f = tiktokState.sort;
-  const label = { views: '조회수', likes: '좋아요', comments: '댓글' };
-  const sorted = tiktokData.slice().sort((a, b) => (b[f] || 0) - (a[f] || 0));
+  const label = { views: 'views', likes: 'likes', comments: 'comments' };
+  const rows = tiktokData.filter(t => textMatch(t, state.search) && periodMatch(t.createdAt, tiktokState.period));
+  const sorted = rows.slice().sort((a, b) => (b[f] || 0) - (a[f] || 0));
   grid.innerHTML = '';
   sorted.forEach((t, i) => {
     const el = document.createElement('div');
@@ -783,22 +890,24 @@ function renderTikTok() {
     el.innerHTML = `
       <div style="position:relative">
         <img class="thumb" loading="lazy" src="/api/img?u=${encodeURIComponent(t.thumbnail)}" alt="">
-        <div class="rank${i < 3 ? ' top' : ''}">${i + 1}위</div>
+        <div class="rank${i < 3 ? ' top' : ''}">#${i + 1}</div>
       </div>
       <div class="meta">
         <div class="title"></div>
         <div class="sub">
-          <span class="${f === 'views' ? 'views' : ''}">👁️ ${fmt2(t.views)}</span>
-          <span class="${f === 'likes' ? 'views' : ''}">❤️ ${fmt2(t.likes)}</span>
-          <span class="${f === 'comments' ? 'views' : ''}">💬 ${fmt2(t.comments)}</span>
+          <span class="${f === 'views' ? 'views' : ''}">👁️ ${fmtN(t.views)}</span>
+          <span class="${f === 'likes' ? 'views' : ''}">❤️ ${fmtN(t.likes)}</span>
+          <span class="${f === 'comments' ? 'views' : ''}">💬 ${fmtN(t.comments)}</span>
+          ${deltaHTML(t)} ${sparkHTML(t)}
         </div>
         <div class="sub" style="margin-top:3px"><span>@${t.account}</span></div>
       </div>`;
     el.querySelector('.title').textContent = t.title;
+    el.appendChild(favButton(favPayload('tiktok', t)));
     el.onclick = () => window.open(t.url, '_blank');
     grid.appendChild(el);
   });
-  document.getElementById('ttCount').textContent = `${label[f]} 기준 · 총 ${sorted.length}개`;
+  document.getElementById('ttCount').textContent = `by ${label[f]} · ${sorted.length} videos`;
 }
 function renderTtChips(accounts) {
   const box = document.getElementById('ttChips');
@@ -806,7 +915,7 @@ function renderTtChips(accounts) {
   accounts.forEach(name => {
     const chip = document.createElement('span');
     chip.className = 'acc-chip';
-    chip.innerHTML = `@<b></b><button title="삭제">✕</button>`;
+    chip.innerHTML = `@<b></b><button title="Remove">✕</button>`;
     chip.querySelector('b').textContent = name;
     chip.querySelector('button').onclick = () => updateTtAccount('remove', name);
     box.appendChild(chip);
@@ -828,52 +937,102 @@ document.getElementById('ttAdd').onclick = () => {
 };
 document.getElementById('ttInput').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('ttAdd').click(); });
 initFoldMenu('ttSortMenu', [
-  { key: 'views', label: '조회수순', icon: '👁️' },
-  { key: 'likes', label: '좋아요순', icon: '❤️' },
-  { key: 'comments', label: '댓글순', icon: '💬' },
+  { key: 'views', label: 'Views', icon: '👁️' },
+  { key: 'likes', label: 'Likes', icon: '❤️' },
+  { key: 'comments', label: 'Comments', icon: '💬' },
 ], tiktokState, () => renderTikTok());
+initPeriodChips('ttPeriods', tiktokState, () => renderTikTok());
 
-/* ---------- 탭 / 기간 / 새로고침 ---------- */
+/* ---------- Saved tab ---------- */
+const PLATFORM_ICON = { youtube: '▶', shorts: '⚡', reels: '📸', x: '𝕏', threads: '🧵', tiktok: '🎵' };
+async function loadSaved() {
+  const grid = document.getElementById('savedGrid');
+  const status = document.getElementById('savedStatus');
+  grid.innerHTML = '';
+  let items = [];
+  try {
+    const data = await (await fetch('/api/favorites')).json();
+    items = data.items || [];
+    favSet = new Set(items.map(i => i.url));
+  } catch (e) { /* fall through to empty state */ }
+  if (!items.length) {
+    status.style.display = 'block';
+    status.textContent = 'Nothing saved yet — star any card to keep it here.';
+    return;
+  }
+  status.style.display = 'none';
+  items.forEach(it => {
+    const el = document.createElement('div');
+    el.className = 'card';
+    const thumb = it.thumbnail
+      ? (/(cdninstagram|fbcdn|twimg|tiktokcdn)/.test(it.thumbnail)
+          ? '/api/img?u=' + encodeURIComponent(it.thumbnail) : it.thumbnail)
+      : '';
+    el.innerHTML = `
+      ${thumb ? `<img class="thumb" loading="lazy" src="${thumb}" alt="">` : ''}
+      <div class="meta">
+        <div class="title"></div>
+        <div class="sub">
+          <span>${PLATFORM_ICON[it.platform] || '🔗'} ${it.platform || ''}</span>
+          ${it.account ? `<span class="acct"></span>` : ''}
+          ${it.views ? `<span>👁️ ${fmtN(it.views)}</span>` : ''}
+          ${it.likes ? `<span>❤️ ${fmtN(it.likes)}</span>` : ''}
+        </div>
+      </div>`;
+    el.querySelector('.title').textContent = it.title || it.url;
+    const acct = el.querySelector('.acct');
+    if (acct) acct.textContent = '@' + it.account;
+    el.appendChild(favButton(it, () => loadSaved()));
+    el.onclick = () => window.open(it.url, '_blank');
+    grid.appendChild(el);
+  });
+}
+
+/* ---------- tabs / period / refresh ---------- */
+const VIEWS = ['videoView', 'aiView', 'reelsView', 'xView', 'threadsView', 'tiktokView', 'savedView'];
+function showTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  const isVideo = tab === 'youtube' || tab === 'shorts';
+  document.getElementById('toolbar').style.display = isVideo ? 'flex' : 'none';
+  const active = { youtube: 'videoView', shorts: 'videoView', ai: 'aiView', reels: 'reelsView',
+                   x: 'xView', threads: 'threadsView', tiktok: 'tiktokView', saved: 'savedView' }[tab];
+  VIEWS.forEach(id => document.getElementById(id).style.display = id === active ? 'block' : 'none');
+  document.getElementById('searchInput').placeholder =
+    isVideo || tab === 'ai' || tab === 'saved' ? 'Search YouTube (e.g. AI ads)' : 'Filter this tab...';
+}
 document.getElementById('tabs').onclick = e => {
   const btn = e.target.closest('.tab');
   if (!btn) return;
-  state.tab = btn.dataset.tab;
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === btn));
-  const isVideo = state.tab === 'youtube' || state.tab === 'shorts';
-  document.getElementById('toolbar').style.display = isVideo ? 'flex' : 'none';
-  document.getElementById('videoView').style.display = isVideo ? 'block' : 'none';
-  document.getElementById('aiView').style.display = state.tab === 'ai' ? 'block' : 'none';
-  document.getElementById('reelsView').style.display = state.tab === 'reels' ? 'block' : 'none';
-  document.getElementById('xView').style.display = state.tab === 'x' ? 'block' : 'none';
-  document.getElementById('threadsView').style.display = state.tab === 'threads' ? 'block' : 'none';
-  document.getElementById('tiktokView').style.display = state.tab === 'tiktok' ? 'block' : 'none';
-  if (isVideo) loadVideos();
-  else if (state.tab === 'ai') loadAI();
-  else if (state.tab === 'reels') loadReels();
-  else if (state.tab === 'x') loadSocial('x');
-  else if (state.tab === 'threads') loadSocial('threads');
-  else if (state.tab === 'tiktok') loadTikTok();
+  showTab(btn.dataset.tab);
+  const tab = state.tab;
+  if (tab === 'youtube' || tab === 'shorts') loadVideos();
+  else if (tab === 'ai') loadAI();
+  else if (tab === 'reels') loadReels();
+  else if (tab === 'x') loadSocial('x');
+  else if (tab === 'threads') loadSocial('threads');
+  else if (tab === 'tiktok') loadTikTok();
+  else if (tab === 'saved') loadSaved();
 };
 document.getElementById('periods').onclick = e => {
   const btn = e.target.closest('.period');
   if (!btn) return;
   state.period = btn.dataset.period;
-  document.querySelectorAll('.period').forEach(p => p.classList.toggle('active', p === btn));
+  document.querySelectorAll('#periods .period').forEach(p => p.classList.toggle('active', p === btn));
   loadVideos();
 };
-/* ---------- 검색 ---------- */
+
+/* ---------- search: YouTube query on video tabs, live filter elsewhere ---------- */
 document.getElementById('searchForm').addEventListener('submit', e => {
   e.preventDefault();
   const kw = document.getElementById('searchInput').value.trim();
   state.search = kw;
-  // 검색은 영상 탭에서 수행. 다른 탭이면 유튜브로 전환.
-  if (state.tab !== 'youtube' && state.tab !== 'shorts') {
-    state.tab = 'youtube';
-    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'youtube'));
-    document.getElementById('toolbar').style.display = 'flex';
-    ['videoView','aiView','reelsView','xView','threadsView','tiktokView'].forEach(id =>
-      document.getElementById(id).style.display = id === 'videoView' ? 'block' : 'none');
-  }
+  const tab = state.tab;
+  if (tab === 'reels') { renderReels(); return; }
+  if (tab === 'x' || tab === 'threads') { renderSocial(tab); return; }
+  if (tab === 'tiktok') { renderTikTok(); return; }
+  // Video tabs (and AI/Saved): run a YouTube search
+  if (tab !== 'youtube' && tab !== 'shorts') showTab('youtube');
   renderChips();
   loadVideos();
 });
@@ -884,9 +1043,11 @@ document.getElementById('refreshBtn').onclick = () => {
   else if (state.tab === 'x') loadSocial('x', true);
   else if (state.tab === 'threads') loadSocial('threads', true);
   else if (state.tab === 'tiktok') loadTikTok(true);
+  else if (state.tab === 'saved') loadSaved();
   else loadVideos(true);
 };
 
+loadFavSet();
 initCategories().then(() => loadVideos());
 </script>
 </body>
