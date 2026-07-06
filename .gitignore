@@ -1,0 +1,8 @@
+# 화면에서 계정을 추가/삭제하면 생성되는 개인 구독 목록 (커밋하지 않음)
+reels_accounts.json
+x_accounts.json
+threads_accounts.json
+tiktok_accounts.json
+
+__pycache__/
+*.pyc
