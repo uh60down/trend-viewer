@@ -31,6 +31,12 @@ category search terms (Korean, Japanese, and Traditional Chinese queries ship
 built in). The choice is saved to `settings.json` next to the server, so the
 background scheduler follows it too.
 
+For real regions, YouTube results are fetched **relevance-ranked** (which
+YouTube regionalizes properly) and then sorted by view count locally — asking
+YouTube for a raw global views sort floods every category with the largest
+upload markets regardless of country settings. Pick **🌍 Global (most
+viewed)** if you want that raw worldwide ranking anyway.
+
 ## Features
 
 - **YouTube / Shorts tabs** — category chips (All · **AI** · Mukbang · Beauty ·

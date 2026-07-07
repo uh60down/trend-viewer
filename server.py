@@ -55,6 +55,12 @@ IMG_CACHE_MAX = 600
 # published-time words (see PERIOD_EXCLUDE) — country targeting comes
 # from gl, which works with any hl.
 REGIONS = {
+    # "Global" keeps the raw worldwide views-sort; every real region fetches
+    # relevance-sorted (region-targeted) results and ranks by views locally,
+    # because a global views sort drowns every region in the biggest upload
+    # markets no matter what gl says.
+    "GLOBAL": {"label": "Global (most viewed)", "hl": "en", "gl": "US",
+               "tiktok": "US", "views_sort": True},
     "US": {"label": "United States", "hl": "en", "gl": "US"},
     "KR": {"label": "South Korea", "hl": "ko", "gl": "KR"},
     "JP": {"label": "Japan", "hl": "ja", "gl": "JP"},
@@ -323,12 +329,17 @@ def within_period(published: str, period: str, hl: str = "en") -> bool:
     return not any(word in published for word in words)
 
 
-def build_search_params(period: str, shorts: bool = False) -> str:
-    """Build the sort=views(3) + filters(upload date, video, length) protobuf as base64."""
+def build_search_params(period: str, shorts: bool = False, by_views: bool = False) -> str:
+    """Build the search-filter protobuf (upload date, video type, length) as base64.
+
+    by_views adds sort=view count (field 1 = 3). Left off by default: a global
+    views sort ignores regional relevance entirely, so regional fetches use
+    YouTube's relevance ranking (which honors gl) and re-rank by views locally.
+    """
     filters = bytes([0x08, PERIOD_CODE.get(period, 3), 0x10, 0x01])
     if shorts:
         filters += bytes([0x18, 0x01])  # duration: under 4 minutes
-    raw = bytes([0x08, 0x03, 0x12, len(filters)]) + filters
+    raw = (bytes([0x08, 0x03]) if by_views else b"") + bytes([0x12, len(filters)]) + filters
     return base64.urlsafe_b64encode(raw).decode()
 
 
@@ -497,8 +508,9 @@ def yt_client_context():
 
 def yt_search(query: str, period: str, shorts: bool):
     hl, _ = yt_locale()
+    by_views = REGIONS[current_region()].get("views_sort", False)
     payload = dict(yt_client_context(),
-                   query=query, params=build_search_params(period, shorts))
+                   query=query, params=build_search_params(period, shorts, by_views))
     try:
         data = http_json("https://www.youtube.com/youtubei/v1/search", payload)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
@@ -585,7 +597,8 @@ def merge_yt_searches(queries, period, shorts):
 def get_videos(category: str, period: str, shorts: bool, force: bool,
                enrich: bool = False, query: str = ""):
     platform = "shorts" if shorts else "youtube"
-    hl, gl = yt_locale()
+    hl, _ = yt_locale()
+    region = current_region()  # cache per region code: GLOBAL and US share a locale
 
     def fetch():
         if query:
@@ -602,7 +615,7 @@ def get_videos(category: str, period: str, shorts: bool, force: bool,
         record_snapshot(platform, vids)
         attach_history(platform, vids)
         return vids
-    return cached(("yt", query or category, period, shorts, enrich, hl, gl), force, fetch)
+    return cached(("yt", query or category, period, shorts, enrich, region), force, fetch)
 
 
 # ================================================================ Instagram Reels
@@ -966,7 +979,8 @@ def fetch_tiktok_trending(region: str):
 
 def get_tiktok(force: bool):
     accounts = load_accounts(TIKTOK_ACCOUNTS_FILE, DEFAULT_TIKTOK_ACCOUNTS)
-    region = current_region()
+    code = current_region()
+    region = REGIONS[code].get("tiktok", code)  # tikwm needs a real country code
 
     def fetch():
         # Merge the trending feed with subscribed accounts' latest videos, deduped.

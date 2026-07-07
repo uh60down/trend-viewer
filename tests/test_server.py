@@ -94,13 +94,22 @@ class TestRegion(unittest.TestCase):
 
 
 class TestSearchParams(unittest.TestCase):
-    def test_roundtrip_protobuf(self):
+    def test_relevance_sort_is_default(self):
+        # No sort field: relevance ranking (regionalized by gl), filters only
         raw = base64.urlsafe_b64decode(server.build_search_params("week", shorts=False))
+        self.assertEqual(raw, bytes([0x12, 0x04, 0x08, 0x03, 0x10, 0x01]))
+
+    def test_views_sort_opt_in(self):
+        raw = base64.urlsafe_b64decode(server.build_search_params("week", shorts=False, by_views=True))
         self.assertEqual(raw, bytes([0x08, 0x03, 0x12, 0x04, 0x08, 0x03, 0x10, 0x01]))
 
     def test_shorts_adds_length_filter(self):
         raw = base64.urlsafe_b64decode(server.build_search_params("day", shorts=True))
-        self.assertEqual(raw, bytes([0x08, 0x03, 0x12, 0x06, 0x08, 0x02, 0x10, 0x01, 0x18, 0x01]))
+        self.assertEqual(raw, bytes([0x12, 0x06, 0x08, 0x02, 0x10, 0x01, 0x18, 0x01]))
+
+    def test_global_region_uses_views_sort(self):
+        self.assertTrue(server.REGIONS["GLOBAL"]["views_sort"])
+        self.assertFalse(server.REGIONS["US"].get("views_sort", False))
 
 
 class TestNumberParsing(unittest.TestCase):
@@ -291,16 +300,17 @@ class TestCompactAndDigest(unittest.TestCase):
         server._cache[key] = {"data": data, "fetched": now, "checked": now, "stale": False}
 
     def test_digest_uses_cached_data(self):
-        hl, gl = server.yt_locale()
-        self._seed(("yt", "All", "week", False, False, hl, gl),
+        region = server.current_region()
+        self._seed(("yt", "All", "week", False, False, region),
                    [{"id": "v1", "title": "Big [viral] video", "channel": "Chan",
                      "views": 2_400_000, "delta": 350_000}])
-        self._seed(("yt", "All", "week", True, False, hl, gl), [])
+        self._seed(("yt", "All", "week", True, False, region), [])
         for kind, accounts in (("reels", server.DEFAULT_IG_ACCOUNTS),
                                ("x", server.DEFAULT_X_ACCOUNTS),
                                ("threads", server.DEFAULT_THREADS_ACCOUNTS)):
             self._seed((kind, tuple(accounts)), [])
-        self._seed(("tiktok", tuple(server.DEFAULT_TIKTOK_ACCOUNTS), server.current_region()), [])
+        tt_region = server.REGIONS[region].get("tiktok", region)
+        self._seed(("tiktok", tuple(server.DEFAULT_TIKTOK_ACCOUNTS), tt_region), [])
         text = server.build_digest()
         self.assertIn("## ▶ YouTube", text)
         self.assertIn("Big (viral) video", text)          # brackets sanitized
