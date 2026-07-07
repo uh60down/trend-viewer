@@ -43,8 +43,20 @@ class TestPeriodFilter(unittest.TestCase):
         self.assertFalse(server.within_period("3주 전", "week", "ko"))
         self.assertTrue(server.within_period("6日前", "week", "ja"))
         self.assertFalse(server.within_period("2週間前", "week", "ja"))
-        # unknown language falls back to English words
-        self.assertTrue(server.within_period("vor 2 Wochen", "week", "de"))
+        self.assertTrue(server.within_period("vor 6 Tagen", "week", "de"))
+        self.assertFalse(server.within_period("vor 2 Wochen", "week", "de"))
+        self.assertFalse(server.within_period("il y a 2 ans", "month", "fr"))
+        self.assertTrue(server.within_period("il y a 5 heures", "day", "fr"))
+        # unshipped language falls back to English words (passes through)
+        self.assertTrue(server.within_period("hace 2 semanas", "week", "es"))
+
+    def test_every_localized_hl_has_period_words(self):
+        for code, r in server.REGIONS.items():
+            if r["hl"] != "en":
+                self.assertIn(r["hl"], server.PERIOD_EXCLUDE,
+                              f"region {code}: hl {r['hl']} missing PERIOD_EXCLUDE words")
+                self.assertIn(r["hl"], server.CATEGORY_QUERIES_L10N,
+                              f"region {code}: hl {r['hl']} missing localized queries")
 
 
 class TestRegion(unittest.TestCase):
@@ -82,8 +94,9 @@ class TestRegion(unittest.TestCase):
     def test_category_query_localization(self):
         self.assertEqual(server.category_query("Mukbang", "ko"), "먹방")
         self.assertEqual(server.category_query("Mukbang", "en"), "mukbang")
-        # missing label in an override table falls back to English
-        self.assertEqual(server.category_query("Tech", "de"), "tech review")
+        self.assertEqual(server.category_query("Tech", "de"), "technik test")
+        # a label missing from an override table falls back to English
+        self.assertEqual(server.category_query("Mukbang", "de"), "mukbang")
 
     def test_settings_payload_shape(self):
         p = server.settings_payload()

@@ -27,9 +27,11 @@ Optional configuration via environment variables:
 
 **Region** is normally picked in the UI: the 🌐 selector in the header drives
 YouTube search language/country, the TikTok trending feed, and localized
-category search terms (Korean, Japanese, and Traditional Chinese queries ship
-built in). The choice is saved to `settings.json` next to the server, so the
-background scheduler follows it too.
+category search terms (Korean, Japanese, Traditional Chinese, German, French,
+Portuguese, Indonesian, and Vietnamese queries ship built in — native-language
+queries are what make a region's results actually look local). The choice is
+saved to `settings.json` next to the server, so the background scheduler
+follows it too.
 
 For real regions, YouTube results are fetched **relevance-ranked** (which
 YouTube regionalizes properly) and then sorted by view count locally — asking

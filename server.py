@@ -51,9 +51,9 @@ IMG_CACHE_MAX = 600
 # One region drives everything: YouTube search language/country, TikTok's
 # trending feed, and localized category queries. Picked in the UI (header
 # selector), persisted to settings.json; the REGION env var is only the
-# initial default. hl stays "en" except where we have localized
-# published-time words (see PERIOD_EXCLUDE) — country targeting comes
-# from gl, which works with any hl.
+# initial default. Every non-English hl here must have entries in
+# CATEGORY_QUERIES_L10N and PERIOD_EXCLUDE — the native-language queries are
+# what make results actually look local, not just "popular in that country".
 REGIONS = {
     # "Global" keeps the raw worldwide views-sort; every real region fetches
     # relevance-sorted (region-targeted) results and ranks by views locally,
@@ -66,12 +66,12 @@ REGIONS = {
     "JP": {"label": "Japan", "hl": "ja", "gl": "JP"},
     "TW": {"label": "Taiwan", "hl": "zh-TW", "gl": "TW"},
     "GB": {"label": "United Kingdom", "hl": "en", "gl": "GB"},
-    "DE": {"label": "Germany", "hl": "en", "gl": "DE"},
-    "FR": {"label": "France", "hl": "en", "gl": "FR"},
+    "DE": {"label": "Germany", "hl": "de", "gl": "DE"},
+    "FR": {"label": "France", "hl": "fr", "gl": "FR"},
     "IN": {"label": "India", "hl": "en", "gl": "IN"},
-    "BR": {"label": "Brazil", "hl": "en", "gl": "BR"},
-    "ID": {"label": "Indonesia", "hl": "en", "gl": "ID"},
-    "VN": {"label": "Vietnam", "hl": "en", "gl": "VN"},
+    "BR": {"label": "Brazil", "hl": "pt", "gl": "BR"},
+    "ID": {"label": "Indonesia", "hl": "id", "gl": "ID"},
+    "VN": {"label": "Vietnam", "hl": "vi", "gl": "VN"},
 }
 _env_region = os.environ.get("REGION", "US").upper()
 DEFAULT_REGION = _env_region if _env_region in REGIONS else "US"
@@ -151,11 +151,46 @@ CATEGORY_QUERIES_L10N = {
         "Comedy": "搞笑 綜藝", "Movies/TV": "電影 戲劇 影評", "Tech": "科技 開箱",
         "Education": "知識 科普", "Travel": "旅遊", "Animals": "狗 貓",
     },
+    "de": {
+        "Beauty/Fashion": "beauty schminken mode", "Vlog": "vlog alltag",
+        "Comedy": "comedy lustige videos", "Movies/TV": "film serien kritik",
+        "Tech": "technik test", "Education": "erklärt doku wissen",
+        "Travel": "reisen urlaub", "Animals": "hund katze",
+    },
+    "fr": {
+        "Beauty/Fashion": "beauté maquillage mode", "Vlog": "vlog quotidien",
+        "Comedy": "humour vidéos drôles", "Movies/TV": "film série critique",
+        "Tech": "high-tech test avis", "Education": "vulgarisation documentaire",
+        "Travel": "voyage", "Animals": "chien chat",
+    },
+    "pt": {
+        "Beauty/Fashion": "beleza maquiagem moda", "Vlog": "vlog rotina",
+        "Comedy": "humor vídeos engraçados", "Movies/TV": "filme série crítica",
+        "Tech": "tecnologia review", "Education": "explicado documentário",
+        "Travel": "viagem", "Animals": "cachorro gato",
+    },
+    "id": {
+        "Beauty/Fashion": "kecantikan makeup fashion", "Vlog": "vlog keseharian",
+        "Comedy": "lucu komedi", "Movies/TV": "review film drama",
+        "Tech": "review teknologi gadget", "Education": "penjelasan edukasi",
+        "Travel": "jalan-jalan wisata", "Animals": "anjing kucing",
+    },
+    "vi": {
+        "Mukbang": "mukbang ăn uống", "Beauty/Fashion": "làm đẹp trang điểm thời trang",
+        "Vlog": "vlog cuộc sống", "Comedy": "hài hước video vui",
+        "Movies/TV": "review phim", "Tech": "đánh giá công nghệ",
+        "Education": "kiến thức giải thích", "Travel": "du lịch", "Animals": "chó mèo",
+    },
 }
 AI_QUERIES_L10N = {
     "ko": ["AI 영상 제작", "AI 영상 생성", "sora ai video", "runway kling veo"],
     "ja": ["AI 動画 生成", "AI 動画 作り方", "sora ai video", "runway kling veo"],
     "zh-TW": ["AI 影片 生成", "AI 影像 生成", "sora ai video", "runway kling veo"],
+    "de": ["KI video erstellen", "AI video generator", "sora ai video", "runway kling veo"],
+    "fr": ["IA génération vidéo", "AI video", "sora ai video", "runway kling veo"],
+    "pt": ["IA criação de vídeo", "AI video", "sora ai video", "runway kling veo"],
+    "id": ["AI membuat video", "AI video generator", "sora ai video", "runway kling veo"],
+    "vi": ["AI tạo video", "AI video generator", "sora ai video", "runway kling veo"],
 }
 
 
@@ -190,6 +225,31 @@ PERIOD_EXCLUDE = {
         "day": ("天前", "週前", "个月前", "個月前", "年前"),
         "week": ("週前", "个月前", "個月前", "年前"),
         "month": ("个月前", "個月前", "年前"),
+    },
+    "de": {  # "vor 3 Tagen / 2 Wochen / 1 Monat / 1 Jahr"
+        "day": ("Tag", "Woche", "Monat", "Jahr"),
+        "week": ("Woche", "Monat", "Jahr"),
+        "month": ("Monat", "Jahr"),
+    },
+    "fr": {  # "il y a 3 jours / 2 semaines / 1 mois / 1 an"
+        "day": ("jour", "semaine", "mois", " an"),
+        "week": ("semaine", "mois", " an"),
+        "month": ("mois", " an"),
+    },
+    "pt": {  # "há 3 dias / 2 semanas / 1 mês (meses) / 1 ano"
+        "day": ("dia", "semana", "mês", "mes", "ano"),
+        "week": ("semana", "mês", "mes", "ano"),
+        "month": ("mês", "mes", "ano"),
+    },
+    "id": {  # "3 hari / 2 minggu / 1 bulan / 1 tahun yang lalu"
+        "day": ("hari", "minggu", "bulan", "tahun"),
+        "week": ("minggu", "bulan", "tahun"),
+        "month": ("bulan", "tahun"),
+    },
+    "vi": {  # "3 ngày / 2 tuần / 1 tháng / 1 năm trước"
+        "day": ("ngày", "tuần", "tháng", "năm"),
+        "week": ("tuần", "tháng", "năm"),
+        "month": ("tháng", "năm"),
     },
 }
 
