@@ -37,6 +37,61 @@ class TestPeriodFilter(unittest.TestCase):
     def test_missing_text_passes(self):
         self.assertTrue(server.within_period("", "day"))
 
+    def test_localized_words(self):
+        self.assertTrue(server.within_period("3시간 전", "day", "ko"))
+        self.assertFalse(server.within_period("2일 전", "day", "ko"))
+        self.assertFalse(server.within_period("3주 전", "week", "ko"))
+        self.assertTrue(server.within_period("6日前", "week", "ja"))
+        self.assertFalse(server.within_period("2週間前", "week", "ja"))
+        # unknown language falls back to English words
+        self.assertTrue(server.within_period("vor 2 Wochen", "week", "de"))
+
+
+class TestRegion(unittest.TestCase):
+    def setUp(self):
+        server.SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "test_settings.json")
+        if os.path.exists(server.SETTINGS_FILE):
+            os.remove(server.SETTINGS_FILE)
+
+    def tearDown(self):
+        if os.path.exists(server.SETTINGS_FILE):
+            os.remove(server.SETTINGS_FILE)
+
+    def test_default_region(self):
+        self.assertEqual(server.current_region(), server.DEFAULT_REGION)
+
+    def test_set_region_persists(self):
+        self.assertEqual(server.set_region("KR"), "KR")
+        self.assertEqual(server.current_region(), "KR")
+        self.assertEqual(server.load_settings()["region"], "KR")
+
+    def test_invalid_region_rejected(self):
+        server.set_region("KR")
+        self.assertEqual(server.set_region("XX"), "KR")
+        self.assertEqual(server.current_region(), "KR")
+
+    def test_locale_follows_region(self):
+        server.set_region("JP")
+        old_hl, old_gl = os.environ.pop("YT_HL", None), os.environ.pop("YT_GL", None)
+        try:
+            self.assertEqual(server.yt_locale(), ("ja", "JP"))
+        finally:
+            if old_hl: os.environ["YT_HL"] = old_hl
+            if old_gl: os.environ["YT_GL"] = old_gl
+
+    def test_category_query_localization(self):
+        self.assertEqual(server.category_query("Mukbang", "ko"), "먹방")
+        self.assertEqual(server.category_query("Mukbang", "en"), "mukbang")
+        # missing label in an override table falls back to English
+        self.assertEqual(server.category_query("Tech", "de"), "tech review")
+
+    def test_settings_payload_shape(self):
+        p = server.settings_payload()
+        self.assertIn("region", p)
+        codes = [r["code"] for r in p["regions"]]
+        self.assertIn("US", codes)
+        self.assertIn("KR", codes)
+
 
 class TestSearchParams(unittest.TestCase):
     def test_roundtrip_protobuf(self):
@@ -236,15 +291,16 @@ class TestCompactAndDigest(unittest.TestCase):
         server._cache[key] = {"data": data, "fetched": now, "checked": now, "stale": False}
 
     def test_digest_uses_cached_data(self):
-        self._seed(("yt", "All", "week", False, False),
+        hl, gl = server.yt_locale()
+        self._seed(("yt", "All", "week", False, False, hl, gl),
                    [{"id": "v1", "title": "Big [viral] video", "channel": "Chan",
                      "views": 2_400_000, "delta": 350_000}])
-        self._seed(("yt", "All", "week", True, False), [])
+        self._seed(("yt", "All", "week", True, False, hl, gl), [])
         for kind, accounts in (("reels", server.DEFAULT_IG_ACCOUNTS),
                                ("x", server.DEFAULT_X_ACCOUNTS),
-                               ("threads", server.DEFAULT_THREADS_ACCOUNTS),
-                               ("tiktok", server.DEFAULT_TIKTOK_ACCOUNTS)):
+                               ("threads", server.DEFAULT_THREADS_ACCOUNTS)):
             self._seed((kind, tuple(accounts)), [])
+        self._seed(("tiktok", tuple(server.DEFAULT_TIKTOK_ACCOUNTS), server.current_region()), [])
         text = server.build_digest()
         self.assertIn("## ▶ YouTube", text)
         self.assertIn("Big (viral) video", text)          # brackets sanitized

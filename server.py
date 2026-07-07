@@ -6,9 +6,11 @@ Standard library only. Run:  python3 server.py  →  http://localhost:8778
 
 Configuration (environment variables, all optional):
   PORT              HTTP port                            (default 8778)
-  YT_HL             YouTube UI language                  (default en)
-  YT_GL             YouTube region                       (default US)
-  REGION            TikTok trending-feed region          (default US)
+  REGION            Initial region until one is picked
+                    in the UI (header selector; persisted
+                    to settings.json)                    (default US)
+  YT_HL / YT_GL     Advanced: override the region's
+                    YouTube language/country             (unset)
   CACHE_TTL         Cache lifetime in seconds            (default 3600)
   REFRESH_INTERVAL  Background refresh in seconds, 0=off (default 3600)
 """
@@ -33,8 +35,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "3600"))
 STALE_RETRY = 300  # after a failed refresh, retry upstream at most every 5 min
 REFRESH_INTERVAL = int(os.environ.get("REFRESH_INTERVAL", "3600"))  # 0 disables
-YT_HL = os.environ.get("YT_HL", "en")
-YT_GL = os.environ.get("YT_GL", "US")
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
@@ -46,6 +46,70 @@ _cache_lock = threading.Lock()
 _img_cache = {}
 _img_lock = threading.Lock()
 IMG_CACHE_MAX = 600
+
+# ---------------------------------------------------------------- Region
+# One region drives everything: YouTube search language/country, TikTok's
+# trending feed, and localized category queries. Picked in the UI (header
+# selector), persisted to settings.json; the REGION env var is only the
+# initial default. hl stays "en" except where we have localized
+# published-time words (see PERIOD_EXCLUDE) — country targeting comes
+# from gl, which works with any hl.
+REGIONS = {
+    "US": {"label": "United States", "hl": "en", "gl": "US"},
+    "KR": {"label": "South Korea", "hl": "ko", "gl": "KR"},
+    "JP": {"label": "Japan", "hl": "ja", "gl": "JP"},
+    "TW": {"label": "Taiwan", "hl": "zh-TW", "gl": "TW"},
+    "GB": {"label": "United Kingdom", "hl": "en", "gl": "GB"},
+    "DE": {"label": "Germany", "hl": "en", "gl": "DE"},
+    "FR": {"label": "France", "hl": "en", "gl": "FR"},
+    "IN": {"label": "India", "hl": "en", "gl": "IN"},
+    "BR": {"label": "Brazil", "hl": "en", "gl": "BR"},
+    "ID": {"label": "Indonesia", "hl": "en", "gl": "ID"},
+    "VN": {"label": "Vietnam", "hl": "en", "gl": "VN"},
+}
+_env_region = os.environ.get("REGION", "US").upper()
+DEFAULT_REGION = _env_region if _env_region in REGIONS else "US"
+SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
+_settings_lock = threading.Lock()
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE) as f:
+            s = json.load(f)
+            if isinstance(s, dict):
+                return s
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def save_settings(s):
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=2)
+
+
+def current_region() -> str:
+    code = str(load_settings().get("region", "")).upper()
+    return code if code in REGIONS else DEFAULT_REGION
+
+
+def set_region(code: str) -> str:
+    code = str(code or "").upper()
+    if code not in REGIONS:
+        return current_region()
+    with _settings_lock:
+        s = load_settings()
+        s["region"] = code
+        save_settings(s)
+    return code
+
+
+def yt_locale():
+    r = REGIONS[current_region()]
+    return (os.environ.get("YT_HL") or r["hl"],
+            os.environ.get("YT_GL") or r["gl"])
+
 
 # ---------------------------------------------------------------- YouTube
 # Category label -> YouTube search query
@@ -63,15 +127,64 @@ CATEGORIES = {
 # The "All" tab merges these categories, re-sorted by views
 ALL_MERGE = ["Mukbang", "Vlog", "Comedy", "Beauty/Fashion", "Movies/TV", "Travel"]
 
+# Localized query overrides per YouTube hl (labels stay English in the UI;
+# only the search terms change). Missing labels fall back to English.
+CATEGORY_QUERIES_L10N = {
+    "ko": {
+        "Mukbang": "먹방", "Beauty/Fashion": "뷰티 메이크업 패션", "Vlog": "브이로그",
+        "Comedy": "예능 웃긴 영상", "Movies/TV": "영화 드라마 리뷰", "Tech": "테크 리뷰",
+        "Education": "지식 교양", "Travel": "여행", "Animals": "강아지 고양이",
+    },
+    "ja": {
+        "Mukbang": "モッパン 大食い", "Beauty/Fashion": "美容 メイク", "Vlog": "vlog 日常",
+        "Comedy": "お笑い 面白い動画", "Movies/TV": "映画 ドラマ レビュー", "Tech": "ガジェット レビュー",
+        "Education": "解説 教養", "Travel": "旅行", "Animals": "犬 猫",
+    },
+    "zh-TW": {
+        "Mukbang": "吃播", "Beauty/Fashion": "美妝 時尚", "Vlog": "vlog 日常",
+        "Comedy": "搞笑 綜藝", "Movies/TV": "電影 戲劇 影評", "Tech": "科技 開箱",
+        "Education": "知識 科普", "Travel": "旅遊", "Animals": "狗 貓",
+    },
+}
+AI_QUERIES_L10N = {
+    "ko": ["AI 영상 제작", "AI 영상 생성", "sora ai video", "runway kling veo"],
+    "ja": ["AI 動画 生成", "AI 動画 作り方", "sora ai video", "runway kling veo"],
+    "zh-TW": ["AI 影片 生成", "AI 影像 生成", "sora ai video", "runway kling veo"],
+}
+
+
+def category_query(label: str, hl: str) -> str:
+    return CATEGORY_QUERIES_L10N.get(hl, {}).get(label) or CATEGORIES.get(label, label)
+
+
 # Search-filter protobuf: upload date (2=today, 3=this week, 4=this month)
 PERIOD_CODE = {"day": 2, "week": 3, "month": 4}
 
 # Recommendation shelves mixed into search results can bypass the upload-date
-# filter; drop them by their published-time text ("N days ago" style).
+# filter; drop them by their published-time text ("N days ago" style). The
+# words are localized per hl because YouTube localizes that text; unknown
+# languages fall back to English (regions we ship keep hl in this table).
 PERIOD_EXCLUDE = {
-    "day": ("day", "week", "month", "year"),
-    "week": ("week", "month", "year"),
-    "month": ("month", "year"),
+    "en": {
+        "day": ("day", "week", "month", "year"),
+        "week": ("week", "month", "year"),
+        "month": ("month", "year"),
+    },
+    "ko": {
+        "day": ("일 전", "주 전", "개월 전", "년 전"),
+        "week": ("주 전", "개월 전", "년 전"),
+        "month": ("개월 전", "년 전"),
+    },
+    "ja": {
+        "day": ("日前", "週間前", "か月前", "年前"),
+        "week": ("週間前", "か月前", "年前"),
+        "month": ("か月前", "年前"),
+    },
+    "zh-TW": {
+        "day": ("天前", "週前", "个月前", "個月前", "年前"),
+        "week": ("週前", "个月前", "個月前", "年前"),
+        "month": ("个月前", "個月前", "年前"),
+    },
 }
 
 # ---------------------------------------------------------------- Instagram Reels
@@ -105,7 +218,6 @@ DEFAULT_TIKTOK_ACCOUNTS = [
     "zachking", "khaby.lame", "google",
 ]
 TIKWM_BASE = "https://www.tikwm.com/api"
-TIKTOK_REGION = os.environ.get("REGION", "US")
 
 # ---------------------------------------------------------------- AI videos tab
 AI_YT_QUERIES = ["AI video generation", "sora ai video", "runway kling veo", "AI filmmaking"]
@@ -204,10 +316,11 @@ def attach_history(platform, items, id_field="id", metric="views"):
     return items
 
 
-def within_period(published: str, period: str) -> bool:
+def within_period(published: str, period: str, hl: str = "en") -> bool:
     if not published:
         return True  # no published-time text (live streams etc.) passes through
-    return not any(word in published for word in PERIOD_EXCLUDE.get(period, ()))
+    words = PERIOD_EXCLUDE.get(hl, PERIOD_EXCLUDE["en"]).get(period, ())
+    return not any(word in published for word in words)
 
 
 def build_search_params(period: str, shorts: bool = False) -> str:
@@ -374,14 +487,16 @@ def extract_videos(node, out):
 
 
 def yt_client_context():
+    hl, gl = yt_locale()
     return {"context": {"client": {
         "clientName": "WEB",
         "clientVersion": "2.20250624.01.00",
-        "hl": YT_HL, "gl": YT_GL,
+        "hl": hl, "gl": gl,
     }}}
 
 
 def yt_search(query: str, period: str, shorts: bool):
+    hl, _ = yt_locale()
     payload = dict(yt_client_context(),
                    query=query, params=build_search_params(period, shorts))
     try:
@@ -392,7 +507,7 @@ def yt_search(query: str, period: str, shorts: bool):
     extract_videos(data, videos)
     seen, unique = set(), []
     for v in videos:
-        if v["id"] and v["id"] not in seen and within_period(v["published"], period):
+        if v["id"] and v["id"] not in seen and within_period(v["published"], period, hl):
             seen.add(v["id"])
             unique.append(v)
     return unique
@@ -470,23 +585,24 @@ def merge_yt_searches(queries, period, shorts):
 def get_videos(category: str, period: str, shorts: bool, force: bool,
                enrich: bool = False, query: str = ""):
     platform = "shorts" if shorts else "youtube"
+    hl, gl = yt_locale()
 
     def fetch():
         if query:
             queries = [query]
         elif category == "All":
-            queries = [CATEGORIES[c] for c in ALL_MERGE]
+            queries = [category_query(c, hl) for c in ALL_MERGE]
         elif category == "AI":
-            queries = AI_YT_QUERIES
+            queries = AI_QUERIES_L10N.get(hl, AI_YT_QUERIES)
         else:
-            queries = [CATEGORIES.get(category, category)]
+            queries = [category_query(category, hl)]
         vids = merge_yt_searches(queries, period, shorts)
         if enrich:
             enrich_likes(vids)
         record_snapshot(platform, vids)
         attach_history(platform, vids)
         return vids
-    return cached(("yt", query or category, period, shorts, enrich), force, fetch)
+    return cached(("yt", query or category, period, shorts, enrich, hl, gl), force, fetch)
 
 
 # ================================================================ Instagram Reels
@@ -838,8 +954,8 @@ def fetch_tiktok_user(handle: str):
     return [_tiktok_item(v) for v in vids]
 
 
-def fetch_tiktok_trending():
-    url = "%s/feed/list?region=%s&count=20" % (TIKWM_BASE, TIKTOK_REGION)
+def fetch_tiktok_trending(region: str):
+    url = "%s/feed/list?region=%s&count=20" % (TIKWM_BASE, region)
     try:
         d = http_json(url, timeout=15)
     except Exception:
@@ -850,11 +966,12 @@ def fetch_tiktok_trending():
 
 def get_tiktok(force: bool):
     accounts = load_accounts(TIKTOK_ACCOUNTS_FILE, DEFAULT_TIKTOK_ACCOUNTS)
+    region = current_region()
 
     def fetch():
         # Merge the trending feed with subscribed accounts' latest videos, deduped.
         # tikwm's free tier rate-limits aggressive concurrency, so keep it low.
-        posts = with_backoff(("tiktok", "_trending"), fetch_tiktok_trending)
+        posts = with_backoff(("tiktok", "_trending"), lambda: fetch_tiktok_trending(region))
         with ThreadPoolExecutor(max_workers=3) as pool:
             for chunk in pool.map(
                     lambda a: with_backoff(("tiktok", a), lambda: fetch_tiktok_user(a)), accounts):
@@ -867,7 +984,7 @@ def get_tiktok(force: bool):
         record_snapshot("tiktok", unique)
         attach_history("tiktok", unique)
         return unique
-    posts, fetched_at, stale = cached(("tiktok", tuple(accounts)), force, fetch)
+    posts, fetched_at, stale = cached(("tiktok", tuple(accounts), region), force, fetch)
     return posts, accounts, fetched_at, stale
 
 
@@ -1003,7 +1120,12 @@ def get_status():
     with _status_lock:
         sources = {k: dict(v) for k, v in _status.items()}
     return {"sources": sources, "cooldowns": cooldowns,
-            "scheduler": dict(_scheduler), "now": now}
+            "scheduler": dict(_scheduler), "region": current_region(), "now": now}
+
+
+def settings_payload():
+    return {"region": current_region(),
+            "regions": [{"code": c, "label": r["label"]} for c, r in REGIONS.items()]}
 
 
 def build_digest():
@@ -1186,6 +1308,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, get_status())
             return
 
+        if parsed.path == "/api/settings":
+            self._send(200, settings_payload())
+            return
+
         if parsed.path == "/api/digest":
             self._send(200, build_digest().encode(), "text/markdown; charset=utf-8")
             return
@@ -1253,6 +1379,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             items = update_favorites(action, req.get("item") or {})
             self._send(200, {"items": items})
+            return
+
+        if parsed.path == "/api/settings":
+            if "region" in req:
+                set_region(req.get("region"))
+            self._send(200, settings_payload())
             return
 
         self._send(404, {"error": "not found"})

@@ -23,6 +23,8 @@
   #searchBtn { background: var(--accent); border: none; color: #fff; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
   #refreshBtn, #digestBtn, #statusBtn { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
   #refreshBtn:hover, #digestBtn:hover, #statusBtn:hover { border-color: var(--accent2); }
+  #regionSel { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; cursor: pointer; }
+  #regionSel:hover, #regionSel:focus { border-color: var(--accent2); outline: none; }
   #updated { color: var(--muted); font-size: 12px; }
   #updated.stale { color: var(--star); }
 
@@ -162,6 +164,7 @@
 <header>
   <h1>Daily <span>Trend</span> Viewer</h1>
   <div id="today"></div>
+  <select id="regionSel" title="Region — drives YouTube and TikTok trending"></select>
   <form id="searchForm">
     <input id="searchInput" type="search" placeholder="Search YouTube (e.g. AI ads)">
     <button id="searchBtn" type="submit">🔍 Search</button>
@@ -1128,7 +1131,7 @@ function renderStatus(s) {
   const t = ts => ts ? new Date(ts * 1000).toLocaleTimeString('en-US') : '—';
   let html = '<h3>Data source status</h3>';
   const sch = s.scheduler || {};
-  html += `<div class="sched">${sch.enabled
+  html += `<div class="sched">${s.region ? `Region: ${s.region} · ` : ''}${sch.enabled
     ? `Auto-refresh every ${Math.round(sch.interval / 60)} min · last ${t(sch.lastRun)} · next ~${t(sch.nextRun)}`
     : 'Auto-refresh off (set REFRESH_INTERVAL to enable)'}</div>`;
   STATUS_SOURCES.forEach(([key, label]) => {
@@ -1162,6 +1165,30 @@ document.addEventListener('click', e => {
   if (statusPanel.style.display === 'block' && !statusPanel.contains(e.target)) statusPanel.style.display = 'none';
 });
 
+/* ---------- region selector ---------- */
+const flag = code => [...code].map(c => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65)).join('');
+async function initRegion() {
+  const sel = document.getElementById('regionSel');
+  try {
+    const s = await (await fetch('/api/settings')).json();
+    sel.innerHTML = s.regions.map(r =>
+      `<option value="${r.code}"${r.code === s.region ? ' selected' : ''}>${flag(r.code)} ${r.label}</option>`).join('');
+  } catch (e) {
+    sel.style.display = 'none';
+    return;
+  }
+  sel.onchange = async () => {
+    sel.disabled = true;
+    try {
+      await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ region: sel.value }) });
+      loadTabData(state.tab, true);
+    } catch (e) { /* keep old region on failure */ }
+    sel.disabled = false;
+  };
+}
+
+initRegion();
 loadFavSet();
 initCategories().then(() => {
   const tab = savedUI.tab || 'youtube';

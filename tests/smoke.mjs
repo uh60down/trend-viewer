@@ -45,6 +45,10 @@ await page.waitForTimeout(600);
 const rows = await page.locator('#statusPanel .st-row').count();
 if (rows < 7) errors.push(`status panel: expected 7 source rows, got ${rows}`);
 
+// Region selector is populated and set to a valid region
+const regionOpts = await page.locator('#regionSel option').count();
+if (regionOpts < 5) errors.push(`region selector: expected several options, got ${regionOpts}`);
+
 // The sort menu opens and contains the Hot option
 await page.click('.tab[data-tab="youtube"]');
 await page.click('#vidSortMenu .sorttoggle');

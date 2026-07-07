@@ -17,14 +17,19 @@ Then open **http://localhost:8778**.
 
 Optional configuration via environment variables:
 
-| Variable           | Default | Meaning                                  |
-|--------------------|---------|------------------------------------------|
-| `PORT`             | `8778`  | HTTP port                                |
-| `YT_HL`            | `en`    | YouTube UI language                      |
-| `YT_GL`            | `US`    | YouTube region                           |
-| `REGION`           | `US`    | TikTok trending-feed region              |
-| `CACHE_TTL`        | `3600`  | Cache lifetime in seconds                |
-| `REFRESH_INTERVAL` | `3600`  | Background refresh in seconds (0 = off)  |
+| Variable           | Default | Meaning                                            |
+|--------------------|---------|----------------------------------------------------|
+| `PORT`             | `8778`  | HTTP port                                          |
+| `REGION`           | `US`    | Initial region until one is picked in the UI       |
+| `CACHE_TTL`        | `3600`  | Cache lifetime in seconds                          |
+| `REFRESH_INTERVAL` | `3600`  | Background refresh in seconds (0 = off)            |
+| `YT_HL` / `YT_GL`  | unset   | Advanced: override the region's YouTube locale     |
+
+**Region** is normally picked in the UI: the 🌐 selector in the header drives
+YouTube search language/country, the TikTok trending feed, and localized
+category search terms (Korean, Japanese, and Traditional Chinese queries ship
+built in). The choice is saved to `settings.json` next to the server, so the
+background scheduler follows it too.
 
 ## Features
 
