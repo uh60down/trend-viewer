@@ -21,10 +21,25 @@
   #searchInput { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 13px; color: var(--text); font-size: 13px; width: 230px; }
   #searchInput:focus { outline: none; border-color: var(--accent2); }
   #searchBtn { background: var(--accent); border: none; color: #fff; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
-  #refreshBtn { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
-  #refreshBtn:hover { border-color: var(--accent2); }
+  #refreshBtn, #digestBtn, #statusBtn { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+  #refreshBtn:hover, #digestBtn:hover, #statusBtn:hover { border-color: var(--accent2); }
   #updated { color: var(--muted); font-size: 12px; }
   #updated.stale { color: var(--star); }
+
+  /* status panel */
+  #statusPanel { position: fixed; top: 64px; right: 24px; z-index: 90; width: 360px; max-width: calc(100vw - 32px); background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: 0 12px 32px rgba(0,0,0,.5); display: none; font-size: 13px; }
+  #statusPanel h3 { font-size: 14px; margin-bottom: 8px; }
+  #statusPanel .sched { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  .st-row { display: flex; gap: 9px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .st-row:last-child { border-bottom: none; }
+  .st-row .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.ok { background: var(--up); }
+  .dot.stale { background: var(--star); }
+  .dot.bad { background: var(--down); }
+  .dot.idle { background: var(--border); }
+  .st-row .sname { font-weight: 700; width: 76px; }
+  .st-row .sinfo { color: var(--muted); flex: 1; }
+  #statusPanel .cool { margin-top: 10px; color: var(--star); font-size: 12px; line-height: 1.6; }
 
   .tabs { display: flex; gap: 8px; padding: 14px 24px 0; flex-wrap: wrap; }
   .tab { padding: 9px 18px; border-radius: 10px 10px 0 0; background: transparent; color: var(--muted); border: 1px solid transparent; border-bottom: none; cursor: pointer; font-size: 14px; font-weight: 700; }
@@ -152,8 +167,11 @@
     <button id="searchBtn" type="submit">🔍 Search</button>
   </form>
   <button id="refreshBtn">🔄 Refresh</button>
+  <button id="digestBtn" title="Download today's top items as Markdown">📥 Digest</button>
+  <button id="statusBtn" title="Data source status">ⓘ Status</button>
   <div id="updated"></div>
 </header>
+<div id="statusPanel"></div>
 
 <nav class="tabs" id="tabs">
   <button class="tab active" data-tab="youtube">▶ YouTube</button>
@@ -302,6 +320,34 @@
 <script>
 const state = { tab: 'youtube', category: 'All', period: 'week', categories: ['All'], search: '' };
 
+/* ---------- remembered UI state ---------- */
+const UI_KEY = 'tv-ui';
+let savedUI = {};
+try { savedUI = JSON.parse(localStorage.getItem(UI_KEY)) || {}; } catch (e) { savedUI = {}; }
+function saveUI() {
+  localStorage.setItem(UI_KEY, JSON.stringify({
+    tab: state.tab, category: state.category, period: state.period,
+    vid: vidState.sort,
+    reelsSort: reelsState.sort, reelsPeriod: reelsState.period,
+    ttSort: tiktokState.sort, ttPeriod: tiktokState.period,
+    x: social.x.sort, th: social.threads.sort,
+  }));
+}
+
+/* Sorting helper: 'delta' (Hot) ranks unmeasured items last, not at zero */
+function sortVal(o, f) {
+  if (f === 'delta') return o.delta === undefined ? -Infinity : o.delta;
+  return o[f] || 0;
+}
+const bySort = f => (a, b) => sortVal(b, f) - sortVal(a, f);
+
+if (savedUI.category) state.category = savedUI.category;
+if (savedUI.period) {
+  state.period = savedUI.period;
+  document.querySelectorAll('#periods .period').forEach(p =>
+    p.classList.toggle('active', p.dataset.period === state.period));
+}
+
 const fmtN = n => {
   n = n || 0;
   if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
@@ -384,6 +430,7 @@ function renderChips() {
     b.onclick = () => {
       state.category = c; state.search = '';
       document.getElementById('searchInput').value = '';
+      saveUI();
       renderChips(); loadVideos();
     };
     box.appendChild(b);
@@ -394,7 +441,7 @@ function renderChips() {
 let loadSeq = 0;
 let vidData = [];
 let vidHasLikes = false;
-const vidState = { sort: 'views' };  // views | likes
+const vidState = { sort: savedUI.vid || 'views' };  // views | likes | delta
 async function loadVideos(force = false) {
   if (state.tab !== 'youtube' && state.tab !== 'shorts') return;
   const seq = ++loadSeq;
@@ -429,8 +476,7 @@ async function loadVideos(force = false) {
 function renderVideos() {
   const grid = document.getElementById('grid');
   grid.className = 'grid' + (state.tab === 'shorts' ? ' shorts' : '');
-  const f = vidState.sort;
-  const sorted = vidData.slice().sort((a, b) => (b[f] || 0) - (a[f] || 0));
+  const sorted = vidData.slice().sort(bySort(vidState.sort));
   grid.innerHTML = '';
   sorted.forEach((v, i) => grid.appendChild(videoCard(v, i + 1)));
 }
@@ -567,7 +613,7 @@ function initPeriodChips(elId, stateObj, onPick) {
 
 /* ---------- Instagram Reels ---------- */
 let reelsData = [];
-const reelsState = { sort: 'views', period: 'all' };  // views | likes | comments
+const reelsState = { sort: savedUI.reelsSort || 'views', period: savedUI.reelsPeriod || 'all' };
 async function loadReels(force = false) {
   const status = document.getElementById('reelsStatus');
   const grid = document.getElementById('reelsGrid');
@@ -593,9 +639,9 @@ async function loadReels(force = false) {
 function renderReels() {
   const grid = document.getElementById('reelsGrid');
   const f = reelsState.sort;
-  const label = { views: 'views', likes: 'likes', comments: 'comments' };
+  const label = { views: 'views', likes: 'likes', comments: 'comments', delta: 'hot' };
   const rows = reelsData.filter(r => textMatch(r, state.search) && periodMatch(r.takenAt, reelsState.period));
-  const sorted = rows.slice().sort((a, b) => (b[f] || 0) - (a[f] || 0));
+  const sorted = rows.slice().sort(bySort(f));
   grid.innerHTML = '';
   sorted.forEach((r, i) => {
     const el = document.createElement('div');
@@ -659,10 +705,11 @@ const SORT_OPTS = {
   replies: { label: 'Replies', icon: '💬', field: 'replies' },
   reposts: { label: 'Reposts', icon: '🔁', field: 'retweets' },
   views: { label: 'Views', icon: '👁️', field: 'views' },
+  delta: { label: 'Hot (daily Δ)', icon: '🔥', field: 'delta' },
 };
 const social = {
-  x: { data: [], sort: 'likes', opts: ['likes', 'replies', 'reposts', 'views'], repostField: 'retweets' },
-  threads: { data: [], sort: 'likes', opts: ['likes', 'replies', 'reposts'], repostField: 'reposts' },
+  x: { data: [], sort: savedUI.x || 'likes', opts: ['likes', 'replies', 'reposts', 'views', 'delta'], repostField: 'retweets' },
+  threads: { data: [], sort: savedUI.th || 'likes', opts: ['likes', 'replies', 'reposts', 'delta'], repostField: 'reposts' },
 };
 
 function buildSortMenu(kind, menuId, onPick) {
@@ -676,12 +723,14 @@ function buildSortMenu(kind, menuId, onPick) {
     const b = document.createElement('button');
     b.className = key === cfg.sort ? 'sel' : '';
     b.innerHTML = `<span>${o.icon}</span><span>${label}</span><span class="check">✓</span>`;
+    if (key === cfg.sort) menu.querySelector('.curlabel').textContent = label;
     b.onclick = () => {
       cfg.sort = key;
       menu.querySelector('.curlabel').textContent = label;
       list.querySelectorAll('button').forEach(x => x.classList.remove('sel'));
       b.classList.add('sel');
       menu.classList.remove('open');
+      saveUI();
       onPick();
     };
     list.appendChild(b);
@@ -728,7 +777,7 @@ function renderSocial(kind) {
   const cntEl = document.getElementById(kind === 'x' ? 'xCount' : 'thCount');
   const f = sortField(kind);
   const rows = social[kind].data.filter(p => textMatch(p, state.search));
-  const sorted = rows.slice().sort((a, b) => (b[f] || 0) - (a[f] || 0));
+  const sorted = rows.slice().sort(bySort(f));
   listEl.innerHTML = '';
   sorted.forEach((p, i) => listEl.appendChild(postCard(p, i + 1, kind)));
   cntEl.textContent = sorted.length ? `${sorted.length} posts` : '';
@@ -817,6 +866,7 @@ function initFoldMenu(menuId, options, stateObj, onPick) {
     const b = document.createElement('button');
     b.className = o.key === stateObj.sort ? 'sel' : '';
     b.innerHTML = `<span>${o.icon}</span><span>${o.label}</span><span class="check">✓</span>`;
+    if (o.key === stateObj.sort) menu.querySelector('.curlabel').textContent = o.label;
     b.onclick = () => {
       if (stateObj.sort === o.key) { menu.classList.remove('open'); return; }
       stateObj.sort = o.key;
@@ -824,6 +874,7 @@ function initFoldMenu(menuId, options, stateObj, onPick) {
       list.querySelectorAll('button').forEach(x => x.classList.remove('sel'));
       b.classList.add('sel');
       menu.classList.remove('open');
+      saveUI();
       onPick();
     };
     list.appendChild(b);
@@ -839,6 +890,7 @@ function initFoldMenu(menuId, options, stateObj, onPick) {
 initFoldMenu('vidSortMenu', [
   { key: 'views', label: 'Views', icon: '👁️' },
   { key: 'likes', label: 'Likes', icon: '👍' },
+  { key: 'delta', label: 'Hot (daily Δ)', icon: '🔥' },
 ], vidState, () => {
   if (vidState.sort === 'likes' && !vidHasLikes) loadVideos();  // re-request if likes missing
   else renderVideos();
@@ -849,12 +901,13 @@ initFoldMenu('reelsSortMenu', [
   { key: 'views', label: 'Views', icon: '👁️' },
   { key: 'likes', label: 'Likes', icon: '❤️' },
   { key: 'comments', label: 'Comments', icon: '💬' },
+  { key: 'delta', label: 'Hot (daily Δ)', icon: '🔥' },
 ], reelsState, () => renderReels());
-initPeriodChips('reelsPeriods', reelsState, () => renderReels());
+initPeriodChips('reelsPeriods', reelsState, () => { saveUI(); renderReels(); });
 
 /* ---------- TikTok ---------- */
 let tiktokData = [];
-const tiktokState = { sort: 'views', period: 'all' };  // views | likes | comments
+const tiktokState = { sort: savedUI.ttSort || 'views', period: savedUI.ttPeriod || 'all' };
 async function loadTikTok(force = false) {
   const status = document.getElementById('ttStatus');
   const grid = document.getElementById('ttGrid');
@@ -880,9 +933,9 @@ async function loadTikTok(force = false) {
 function renderTikTok() {
   const grid = document.getElementById('ttGrid');
   const f = tiktokState.sort;
-  const label = { views: 'views', likes: 'likes', comments: 'comments' };
+  const label = { views: 'views', likes: 'likes', comments: 'comments', delta: 'hot' };
   const rows = tiktokData.filter(t => textMatch(t, state.search) && periodMatch(t.createdAt, tiktokState.period));
-  const sorted = rows.slice().sort((a, b) => (b[f] || 0) - (a[f] || 0));
+  const sorted = rows.slice().sort(bySort(f));
   grid.innerHTML = '';
   sorted.forEach((t, i) => {
     const el = document.createElement('div');
@@ -940,8 +993,9 @@ initFoldMenu('ttSortMenu', [
   { key: 'views', label: 'Views', icon: '👁️' },
   { key: 'likes', label: 'Likes', icon: '❤️' },
   { key: 'comments', label: 'Comments', icon: '💬' },
+  { key: 'delta', label: 'Hot (daily Δ)', icon: '🔥' },
 ], tiktokState, () => renderTikTok());
-initPeriodChips('ttPeriods', tiktokState, () => renderTikTok());
+initPeriodChips('ttPeriods', tiktokState, () => { saveUI(); renderTikTok(); });
 
 /* ---------- Saved tab ---------- */
 const PLATFORM_ICON = { youtube: '▶', shorts: '⚡', reels: '📸', x: '𝕏', threads: '🧵', tiktok: '🎵' };
@@ -1000,25 +1054,29 @@ function showTab(tab) {
   VIEWS.forEach(id => document.getElementById(id).style.display = id === active ? 'block' : 'none');
   document.getElementById('searchInput').placeholder =
     isVideo || tab === 'ai' || tab === 'saved' ? 'Search YouTube (e.g. AI ads)' : 'Filter this tab...';
+  saveUI();
+}
+function loadTabData(tab, force = false) {
+  if (tab === 'youtube' || tab === 'shorts') loadVideos(force);
+  else if (tab === 'ai') loadAI(force);
+  else if (tab === 'reels') loadReels(force);
+  else if (tab === 'x') loadSocial('x', force);
+  else if (tab === 'threads') loadSocial('threads', force);
+  else if (tab === 'tiktok') loadTikTok(force);
+  else if (tab === 'saved') loadSaved();
 }
 document.getElementById('tabs').onclick = e => {
   const btn = e.target.closest('.tab');
   if (!btn) return;
   showTab(btn.dataset.tab);
-  const tab = state.tab;
-  if (tab === 'youtube' || tab === 'shorts') loadVideos();
-  else if (tab === 'ai') loadAI();
-  else if (tab === 'reels') loadReels();
-  else if (tab === 'x') loadSocial('x');
-  else if (tab === 'threads') loadSocial('threads');
-  else if (tab === 'tiktok') loadTikTok();
-  else if (tab === 'saved') loadSaved();
+  loadTabData(state.tab);
 };
 document.getElementById('periods').onclick = e => {
   const btn = e.target.closest('.period');
   if (!btn) return;
   state.period = btn.dataset.period;
   document.querySelectorAll('#periods .period').forEach(p => p.classList.toggle('active', p === btn));
+  saveUI();
   loadVideos();
 };
 
@@ -1037,18 +1095,79 @@ document.getElementById('searchForm').addEventListener('submit', e => {
   loadVideos();
 });
 
-document.getElementById('refreshBtn').onclick = () => {
-  if (state.tab === 'ai') loadAI(true);
-  else if (state.tab === 'reels') loadReels(true);
-  else if (state.tab === 'x') loadSocial('x', true);
-  else if (state.tab === 'threads') loadSocial('threads', true);
-  else if (state.tab === 'tiktok') loadTikTok(true);
-  else if (state.tab === 'saved') loadSaved();
-  else loadVideos(true);
+document.getElementById('refreshBtn').onclick = () => loadTabData(state.tab, true);
+
+/* ---------- digest download ---------- */
+document.getElementById('digestBtn').onclick = async () => {
+  const btn = document.getElementById('digestBtn');
+  const old = btn.textContent;
+  btn.textContent = '📥 Building...';
+  try {
+    const text = await (await fetch('/api/digest')).text();
+    const a = document.createElement('a');
+    const blob = new Blob([text], { type: 'text/markdown' });
+    a.href = URL.createObjectURL(blob);
+    a.download = 'trend-digest-' + new Date().toISOString().slice(0, 10) + '.md';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    try { await navigator.clipboard.writeText(text); } catch (e) { /* clipboard optional */ }
+    btn.textContent = '✓ Saved';
+  } catch (e) {
+    btn.textContent = '✗ Failed';
+  }
+  setTimeout(() => { btn.textContent = old; }, 1600);
 };
 
+/* ---------- status panel ---------- */
+const statusPanel = document.getElementById('statusPanel');
+const STATUS_SOURCES = [
+  ['youtube', '▶ YouTube'], ['shorts', '⚡ Shorts'], ['ai', '🤖 AI'], ['reels', '📸 Reels'],
+  ['x', '𝕏 Twitter'], ['threads', '🧵 Threads'], ['tiktok', '🎵 TikTok'],
+];
+function renderStatus(s) {
+  const t = ts => ts ? new Date(ts * 1000).toLocaleTimeString('en-US') : '—';
+  let html = '<h3>Data source status</h3>';
+  const sch = s.scheduler || {};
+  html += `<div class="sched">${sch.enabled
+    ? `Auto-refresh every ${Math.round(sch.interval / 60)} min · last ${t(sch.lastRun)} · next ~${t(sch.nextRun)}`
+    : 'Auto-refresh off (set REFRESH_INTERVAL to enable)'}</div>`;
+  STATUS_SOURCES.forEach(([key, label]) => {
+    const st = (s.sources || {})[key];
+    let dot = 'idle', info = 'not loaded yet';
+    if (st) {
+      dot = st.items === 0 ? 'bad' : (st.stale ? 'stale' : 'ok');
+      info = `${st.items} items · data from ${t(st.lastSuccess)}` + (st.stale ? ' · refresh failing' : '');
+    }
+    html += `<div class="st-row"><span class="dot ${dot}"></span><span class="sname">${label}</span><span class="sinfo">${info}</span></div>`;
+  });
+  const cools = s.cooldowns || [];
+  if (cools.length) {
+    html += '<div class="cool">⏸ Cooling down: ' + cools.map(c =>
+      `${c.source} @${c.account} (retry ${t(c.retryAt)})`).join(' · ') + '</div>';
+  }
+  statusPanel.innerHTML = html;
+}
+document.getElementById('statusBtn').onclick = async ev => {
+  ev.stopPropagation();
+  if (statusPanel.style.display === 'block') { statusPanel.style.display = 'none'; return; }
+  statusPanel.style.display = 'block';
+  statusPanel.innerHTML = '<h3>Data source status</h3><div class="sched">Loading...</div>';
+  try {
+    renderStatus(await (await fetch('/api/status')).json());
+  } catch (e) {
+    statusPanel.innerHTML = '<h3>Data source status</h3><div class="sched">Failed to load.</div>';
+  }
+};
+document.addEventListener('click', e => {
+  if (statusPanel.style.display === 'block' && !statusPanel.contains(e.target)) statusPanel.style.display = 'none';
+});
+
 loadFavSet();
-initCategories().then(() => loadVideos());
+initCategories().then(() => {
+  const tab = savedUI.tab || 'youtube';
+  showTab(tab);
+  loadTabData(tab);
+});
 </script>
 </body>
 </html>

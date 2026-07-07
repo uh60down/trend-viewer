@@ -17,13 +17,14 @@ Then open **http://localhost:8778**.
 
 Optional configuration via environment variables:
 
-| Variable    | Default | Meaning                       |
-|-------------|---------|-------------------------------|
-| `PORT`      | `8778`  | HTTP port                     |
-| `YT_HL`     | `en`    | YouTube UI language           |
-| `YT_GL`     | `US`    | YouTube region                |
-| `REGION`    | `US`    | TikTok trending-feed region   |
-| `CACHE_TTL` | `3600`  | Cache lifetime in seconds     |
+| Variable           | Default | Meaning                                  |
+|--------------------|---------|------------------------------------------|
+| `PORT`             | `8778`  | HTTP port                                |
+| `YT_HL`            | `en`    | YouTube UI language                      |
+| `YT_GL`            | `US`    | YouTube region                           |
+| `REGION`           | `US`    | TikTok trending-feed region              |
+| `CACHE_TTL`        | `3600`  | Cache lifetime in seconds                |
+| `REFRESH_INTERVAL` | `3600`  | Background refresh in seconds (0 = off)  |
 
 ## Features
 
@@ -55,7 +56,16 @@ Optional configuration via environment variables:
 - **📈 Trend history** — every successful fetch snapshots per-item metrics
   into a local SQLite file (`trends.db`); cards then show a **daily delta
   badge** (▲/▼ vs the previous day) and a mini sparkline once three days of
-  data exist.
+  data exist. A **background scheduler** (hourly by default) keeps snapshots
+  accumulating even when no tab is open, and every sort menu has a
+  **🔥 Hot (daily Δ)** option that ranks by growth instead of absolute size.
+- **📥 Digest** — one click downloads (and copies) a Markdown summary of the
+  current top 10 per platform, with links and daily deltas.
+- **ⓘ Status panel** — per-source health at a glance: last successful fetch,
+  item counts, stale/failing indicators, accounts in cooldown, and the
+  scheduler's next run. No more guessing why a tab is empty.
+- **Remembered UI** — the active tab, category, period, and every sort choice
+  persist across restarts (browser `localStorage`).
 - **Resilient caching** — results are cached (1 h by default) and a failed
   refresh **never blanks a tab**: the last good data is served with a
   "cached data" warning while the server retries in the background, and
@@ -91,9 +101,12 @@ Optional configuration via environment variables:
 
 ```bash
 python3 -m unittest discover -s tests -v   # parser & caching tests
+node tests/smoke.mjs                       # browser smoke test (needs playwright + a running server)
 ```
 
-CI (GitHub Actions) runs a syntax check plus the test suite on every push.
+CI (GitHub Actions) runs the unit tests plus a headless-browser smoke test —
+every tab is clicked and any page/console error fails the build — on every
+push.
 
 Files created at runtime — `*_accounts.json`, `favorites.json`, `trends.db` —
 are personal state and gitignored.

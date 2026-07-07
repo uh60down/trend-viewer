@@ -5,11 +5,12 @@ plus AI-video model/news feeds, with no API keys required.
 Standard library only. Run:  python3 server.py  →  http://localhost:8778
 
 Configuration (environment variables, all optional):
-  PORT       HTTP port                          (default 8778)
-  YT_HL      YouTube UI language                (default en)
-  YT_GL      YouTube region                     (default US)
-  REGION     TikTok trending-feed region        (default US)
-  CACHE_TTL  Cache lifetime in seconds          (default 3600)
+  PORT              HTTP port                            (default 8778)
+  YT_HL             YouTube UI language                  (default en)
+  YT_GL             YouTube region                       (default US)
+  REGION            TikTok trending-feed region          (default US)
+  CACHE_TTL         Cache lifetime in seconds            (default 3600)
+  REFRESH_INTERVAL  Background refresh in seconds, 0=off (default 3600)
 """
 import base64
 import email.utils
@@ -31,6 +32,7 @@ PORT = int(os.environ.get("PORT", "8778"))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "3600"))
 STALE_RETRY = 300  # after a failed refresh, retry upstream at most every 5 min
+REFRESH_INTERVAL = int(os.environ.get("REFRESH_INTERVAL", "3600"))  # 0 disables
 YT_HL = os.environ.get("YT_HL", "en")
 YT_GL = os.environ.get("YT_GL", "US")
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -252,6 +254,26 @@ def parse_compact_number(text: str) -> int:
     return int(num * mult)
 
 
+# Per-source fetch status for the UI's status panel (/api/status)
+_status = {}
+_status_lock = threading.Lock()
+
+
+def _source_of_key(key):
+    kind = key[0] if isinstance(key, tuple) and key else str(key)
+    if kind == "yt":
+        return "shorts" if key[3] else "youtube"
+    return kind
+
+
+def _count_items(data):
+    if isinstance(data, list):
+        return len(data)
+    if isinstance(data, dict):
+        return sum(_count_items(v) for v in data.values() if isinstance(v, (list, dict)))
+    return 0
+
+
 def cached(key, force, fetch_fn, is_good=bool):
     """Cache with stale fallback.
 
@@ -286,7 +308,13 @@ def cached(key, force, fetch_fn, is_good=bool):
             empty = result if result is not None else []
             _cache[key] = {"data": empty, "fetched": now, "checked": now, "stale": False}
         hit = _cache[key]
-        return hit["data"], hit["fetched"], hit["stale"]
+        data, fetched, stale = hit["data"], hit["fetched"], hit["stale"]
+    with _status_lock:
+        _status[_source_of_key(key)] = {
+            "lastAttempt": now, "lastSuccess": fetched,
+            "stale": stale, "items": _count_items(data),
+        }
+    return data, fetched, stale
 
 
 # ---------------------------------------------------------------- backoff
@@ -955,6 +983,109 @@ def update_favorites(action, item):
     return items
 
 
+# ================================================================ status / digest / scheduler
+def compact(n):
+    n = n or 0
+    for div, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if n >= div:
+            return ("%.1f" % (n / div)).rstrip("0").rstrip(".") + suffix
+    return str(int(n))
+
+
+def get_status():
+    now = time.time()
+    with _fail_lock:
+        cooldowns = [
+            {"source": k[0], "account": k[1], "failures": f["count"], "retryAt": f["until"]}
+            for k, f in _fail.items()
+            if f["count"] >= FAIL_LIMIT and f["until"] > now
+        ]
+    with _status_lock:
+        sources = {k: dict(v) for k, v in _status.items()}
+    return {"sources": sources, "cooldowns": cooldowns,
+            "scheduler": dict(_scheduler), "now": now}
+
+
+def build_digest():
+    """Markdown digest of the current top items per platform (from caches)."""
+    lines = ["# Daily Trend Digest — " + time.strftime("%Y-%m-%d"), ""]
+
+    def section(title, items, metric, limit=10):
+        if not items:
+            return
+        lines.append("## " + title)
+        lines.append("")
+        unit = "likes" if metric == "likes" else "views"
+        for i, it in enumerate(items[:limit], 1):
+            name = (it.get("title") or it.get("text") or "(untitled)")
+            name = " ".join(name.split()).replace("[", "(").replace("]", ")")[:100]
+            who = it.get("account") or it.get("channel") or ""
+            d = it.get("delta") or 0
+            delta = " · ▲ %s today" % compact(d) if d > 0 else (
+                " · ▼ %s today" % compact(-d) if d < 0 else "")
+            lines.append("%d. [%s](%s) — %s · %s %s%s"
+                         % (i, name, it.get("url", ""), who,
+                            compact(it.get(metric) or 0), unit, delta))
+        lines.append("")
+
+    videos, _, _ = get_videos("All", "week", False, False)
+    videos = [dict(v, url="https://www.youtube.com/watch?v=" + v["id"]) for v in videos]
+    section("▶ YouTube", videos, "views")
+    shorts, _, _ = get_videos("All", "week", True, False)
+    shorts = [dict(v, url="https://www.youtube.com/watch?v=" + v["id"]) for v in shorts]
+    section("⚡ Shorts", shorts, "views")
+    reels, _, _, _ = get_reels(False)
+    section("📸 Reels", reels, "views")
+    tiktok, _, _, _ = get_tiktok(False)
+    section("🎵 TikTok", sorted(tiktok, key=lambda p: p.get("views") or 0, reverse=True), "views")
+    x_posts, _, _, _ = get_x_posts(False)
+    section("𝕏 Twitter", sorted(x_posts, key=lambda p: p.get("likes") or 0, reverse=True), "likes")
+    threads, _, _, _ = get_threads_posts(False)
+    section("🧵 Threads", sorted(threads, key=lambda p: p.get("likes") or 0, reverse=True), "likes")
+
+    if len(lines) <= 2:
+        lines.append("_No data cached yet — open a few tabs or wait for the background refresh._")
+    return "\n".join(lines)
+
+
+# Background scheduler: keeps caches warm and — more importantly — keeps the
+# daily trend-history snapshots accumulating even when no tab is open.
+_scheduler = {"enabled": False, "interval": REFRESH_INTERVAL, "lastRun": 0, "nextRun": 0}
+
+
+def refresh_all():
+    tasks = (
+        lambda: get_videos("All", "week", False, False),
+        lambda: get_videos("All", "week", True, False),
+        lambda: get_reels(False),
+        lambda: get_x_posts(False),
+        lambda: get_threads_posts(False),
+        lambda: get_tiktok(False),
+        lambda: get_ai_data(False),
+    )
+    for task in tasks:
+        try:
+            task()
+        except Exception:
+            pass
+
+
+def _scheduler_loop():
+    while True:
+        _scheduler["lastRun"] = time.time()
+        _scheduler["nextRun"] = _scheduler["lastRun"] + REFRESH_INTERVAL
+        refresh_all()
+        time.sleep(max(60, _scheduler["nextRun"] - time.time()))
+
+
+def start_scheduler():
+    if REFRESH_INTERVAL <= 0:
+        return False
+    _scheduler["enabled"] = True
+    threading.Thread(target=_scheduler_loop, daemon=True).start()
+    return True
+
+
 # ================================================================ misc
 def fetch_oembed(url: str):
     """oEmbed metadata for TikTok/YouTube URLs (CORS-bypass proxy)."""
@@ -1051,6 +1182,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"items": load_favorites()})
             return
 
+        if parsed.path == "/api/status":
+            self._send(200, get_status())
+            return
+
+        if parsed.path == "/api/digest":
+            self._send(200, build_digest().encode(), "text/markdown; charset=utf-8")
+            return
+
         if parsed.path == "/api/oembed":
             self._send(200, fetch_oembed(qs.get("url", [""])[0]))
             return
@@ -1121,5 +1260,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    if start_scheduler():
+        print(f"Background refresh every {REFRESH_INTERVAL}s (REFRESH_INTERVAL=0 to disable)")
     print(f"Trend Viewer running at http://localhost:{PORT}")
     server.serve_forever()

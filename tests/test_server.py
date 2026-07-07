@@ -217,6 +217,63 @@ class TestBackoff(unittest.TestCase):
         self.assertNotIn(key, server._fail)
 
 
+class TestCompactAndDigest(unittest.TestCase):
+    def setUp(self):
+        server._cache.clear()
+
+    def tearDown(self):
+        server._cache.clear()
+
+    def test_compact(self):
+        self.assertEqual(server.compact(2_400_000), "2.4M")
+        self.assertEqual(server.compact(12_000), "12K")
+        self.assertEqual(server.compact(1_500_000_000), "1.5B")
+        self.assertEqual(server.compact(999), "999")
+        self.assertEqual(server.compact(None), "0")
+
+    def _seed(self, key, data):
+        now = time.time()
+        server._cache[key] = {"data": data, "fetched": now, "checked": now, "stale": False}
+
+    def test_digest_uses_cached_data(self):
+        self._seed(("yt", "All", "week", False, False),
+                   [{"id": "v1", "title": "Big [viral] video", "channel": "Chan",
+                     "views": 2_400_000, "delta": 350_000}])
+        self._seed(("yt", "All", "week", True, False), [])
+        for kind, accounts in (("reels", server.DEFAULT_IG_ACCOUNTS),
+                               ("x", server.DEFAULT_X_ACCOUNTS),
+                               ("threads", server.DEFAULT_THREADS_ACCOUNTS),
+                               ("tiktok", server.DEFAULT_TIKTOK_ACCOUNTS)):
+            self._seed((kind, tuple(accounts)), [])
+        text = server.build_digest()
+        self.assertIn("## ▶ YouTube", text)
+        self.assertIn("Big (viral) video", text)          # brackets sanitized
+        self.assertIn("https://www.youtube.com/watch?v=v1", text)
+        self.assertIn("2.4M views", text)
+        self.assertIn("▲ 350K today", text)
+        self.assertNotIn("## 📸 Reels", text)             # empty sections skipped
+
+    def test_status_reports_sources_and_cooldowns(self):
+        server._status.clear()
+        server._fail.clear()
+        self._seed(("reels", ("a",)), [{"id": "r1"}])
+        server.cached(("reels", ("a",)), False, lambda: None)  # cache hit, no status yet
+        server.cached(("tiktok", ("b",)), False, lambda: [{"id": "t1"}])
+        server._fail[("x", "someacct")] = {"count": server.FAIL_LIMIT,
+                                           "until": time.time() + 100}
+        s = server.get_status()
+        self.assertIn("tiktok", s["sources"])
+        self.assertEqual(s["sources"]["tiktok"]["items"], 1)
+        self.assertEqual(len(s["cooldowns"]), 1)
+        self.assertEqual(s["cooldowns"][0]["account"], "someacct")
+        self.assertIn("scheduler", s)
+
+    def test_source_of_key(self):
+        self.assertEqual(server._source_of_key(("yt", "All", "week", True, False)), "shorts")
+        self.assertEqual(server._source_of_key(("yt", "All", "week", False, False)), "youtube")
+        self.assertEqual(server._source_of_key(("threads", ("a",))), "threads")
+
+
 class TestHistory(unittest.TestCase):
     def setUp(self):
         server.DB_FILE = os.path.join(os.path.dirname(__file__), "test_trends.db")

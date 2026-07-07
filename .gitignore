@@ -9,3 +9,8 @@ trends.db
 __pycache__/
 *.pyc
 tests/test_trends.db
+
+# CI-only node artifacts for the browser smoke test
+node_modules/
+package.json
+package-lock.json
