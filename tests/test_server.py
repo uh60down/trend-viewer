@@ -47,8 +47,10 @@ class TestPeriodFilter(unittest.TestCase):
         self.assertFalse(server.within_period("vor 2 Wochen", "week", "de"))
         self.assertFalse(server.within_period("il y a 2 ans", "month", "fr"))
         self.assertTrue(server.within_period("il y a 5 heures", "day", "fr"))
+        self.assertFalse(server.within_period("hace 2 semanas", "week", "es"))
+        self.assertTrue(server.within_period("hace 5 horas", "day", "es"))
         # unshipped language falls back to English words (passes through)
-        self.assertTrue(server.within_period("hace 2 semanas", "week", "es"))
+        self.assertTrue(server.within_period("2 tygodnie temu", "week", "pl"))
 
     def test_every_localized_hl_has_period_words(self):
         for code, r in server.REGIONS.items():

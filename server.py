@@ -68,6 +68,8 @@ REGIONS = {
     "GB": {"label": "United Kingdom", "hl": "en", "gl": "GB"},
     "DE": {"label": "Germany", "hl": "de", "gl": "DE"},
     "FR": {"label": "France", "hl": "fr", "gl": "FR"},
+    "ES": {"label": "Spain", "hl": "es", "gl": "ES"},
+    "PT": {"label": "Portugal", "hl": "pt", "gl": "PT"},
     "IN": {"label": "India", "hl": "en", "gl": "IN"},
     "BR": {"label": "Brazil", "hl": "pt", "gl": "BR"},
     "ID": {"label": "Indonesia", "hl": "id", "gl": "ID"},
@@ -163,6 +165,12 @@ CATEGORY_QUERIES_L10N = {
         "Tech": "high-tech test avis", "Education": "vulgarisation documentaire",
         "Travel": "voyage", "Animals": "chien chat",
     },
+    "es": {
+        "Beauty/Fashion": "belleza maquillaje moda", "Vlog": "vlog día a día",
+        "Comedy": "humor vídeos graciosos", "Movies/TV": "película serie crítica",
+        "Tech": "tecnología review", "Education": "explicado documental",
+        "Travel": "viajes", "Animals": "perro gato",
+    },
     "pt": {
         "Beauty/Fashion": "beleza maquiagem moda", "Vlog": "vlog rotina",
         "Comedy": "humor vídeos engraçados", "Movies/TV": "filme série crítica",
@@ -188,6 +196,7 @@ AI_QUERIES_L10N = {
     "zh-TW": ["AI 影片 生成", "AI 影像 生成", "sora ai video", "runway kling veo"],
     "de": ["KI video erstellen", "AI video generator", "sora ai video", "runway kling veo"],
     "fr": ["IA génération vidéo", "AI video", "sora ai video", "runway kling veo"],
+    "es": ["IA crear vídeo", "AI video generator", "sora ai video", "runway kling veo"],
     "pt": ["IA criação de vídeo", "AI video", "sora ai video", "runway kling veo"],
     "id": ["AI membuat video", "AI video generator", "sora ai video", "runway kling veo"],
     "vi": ["AI tạo video", "AI video generator", "sora ai video", "runway kling veo"],
@@ -235,6 +244,11 @@ PERIOD_EXCLUDE = {
         "day": ("jour", "semaine", "mois", " an"),
         "week": ("semaine", "mois", " an"),
         "month": ("mois", " an"),
+    },
+    "es": {  # "hace 3 días / 2 semanas / 1 mes (meses) / 1 año"
+        "day": ("día", "semana", "mes", "año"),
+        "week": ("semana", "mes", "año"),
+        "month": ("mes", "año"),
     },
     "pt": {  # "há 3 dias / 2 semanas / 1 mês (meses) / 1 ano"
         "day": ("dia", "semana", "mês", "mes", "ano"),
